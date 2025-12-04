@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.32">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>response_to_reviewers</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="RESPONSE_TO_REVIEWERS_files/libs/clipboard/clipboard.min.js"></script>
+<script src="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/popper.min.js"></script>
+<script src="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/anchor.min.js"></script>
+<link href="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="RESPONSE_TO_REVIEWERS_files/libs/quarto-html/quarto-syntax-highlighting-37eea08aefeeee20ff55810ff984fec1.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="RESPONSE_TO_REVIEWERS_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="RESPONSE_TO_REVIEWERS_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="RESPONSE_TO_REVIEWERS_files/libs/bootstrap/bootstrap-fe23b1f7988a21bfbf27d79248ee042a.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="response-to-reviewers" class="level1">
+<h1>Response to Reviewers</h1>
+<p><strong>Manuscript:</strong> Hybrid Generalized Additive-State Space Modelling for Urban NO₂ Prediction: Integrating Spatial and Temporal Dynamics</p>
+<p><strong>Journal:</strong> Environmental Modelling &amp; Software</p>
+<p><strong>Original Manuscript Number:</strong> [Reference number]</p>
+<p><strong>Authors:</strong> Gabriel Oduori, Chiara Cocco, Payam Sajadi, Francesco Pilla</p>
+<hr>
+<p>We thank the Editor and Associate Editor for the opportunity to revise and resubmit this manuscript. We have carefully addressed all comments and have substantially revised the paper. Below, we provide a point-by-point response to each comment, with the revised text shown in <strong>boxed sections</strong>.</p>
+<hr>
+<section id="response-to-associate-editor" class="level2">
+<h2 class="anchored" data-anchor-id="response-to-associate-editor">Response to Associate Editor</h2>
+<section id="general-comment-1" class="level3">
+<h3 class="anchored" data-anchor-id="general-comment-1">General Comment 1</h3>
+<blockquote class="blockquote">
+<p><em>“The organization of topics in the paper could be improved. Care should be taken to make sure that topics are not ‘reintroduced’ or that statements within the paper are contradictory.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have thoroughly reorganized the manuscript to eliminate redundancies and contradictions. Specifically:</p>
+<ul>
+<li>NO₂ and the study context are now introduced once in Section 1 (Introduction) and referenced thereafter without re-explanation</li>
+<li>Acronyms are defined on first use only (e.g., ESCAPE, LUR, SSM, GAM)</li>
+<li>The limitations of static LUR are stated once in Section 2.1, not repeated across sections</li>
+<li>Section 3 (Methods) has been restructured with clear subsections: Study Area → Data Sources → Modelling Framework → Parameter Estimation → Computational Scalability → Evaluation</li>
+<li>Bullet-point lists have been converted to flowing prose throughout</li>
+</ul>
+<p>The revised manuscript now follows a logical progression: gap identification (§1) → literature positioning (§2) → methodology (§3) → results (§4) → discussion (§5).</p>
+<hr>
+</section>
+<section id="general-comment-2" class="level3">
+<h3 class="anchored" data-anchor-id="general-comment-2">General Comment 2</h3>
+<blockquote class="blockquote">
+<p><em>“The framing of the modeling contribution is not currently very sophisticated. The authors seem to ignore the body of work on dynamic modeling in this area, and they would be well served to put their work in better context.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have completely rewritten the Introduction and Section 2 to properly acknowledge and position our work relative to existing spatiotemporal LUR methods. We now explicitly discuss Ma et al.&nbsp;(2024)’s comprehensive review and the various approaches documented therein, clearly articulating what our hybrid framework offers beyond these existing methods.</p>
+<p><strong>Revised Introduction (Paragraphs 3-4):</strong></p>
+<blockquote class="blockquote">
+<p>Over the past decade, LUR methodology has evolved considerably. Ma et al.&nbsp;(2024) provide a comprehensive review documenting this progression, from early cross-sectional models toward increasingly sophisticated spatiotemporal frameworks. Several strategies have been employed to incorporate temporal dynamics: developing separate models for different time periods (Masiol et al., 2018), including temporally varying covariates such as meteorological variables (Rahman et al., 2020), and applying machine learning methods capable of capturing complex spatiotemporal interactions (Wang et al., 2023). Generalised Additive Models (GAMs) have gained particular traction, as they accommodate non-linear predictor-response relationships while retaining the interpretability that distinguishes LUR from black-box alternatives (Hastie and Tibshirani, 1990; Hasenfratz et al., 2014; Lautenschlager et al., 2020).</p>
+<p>Despite these advances, existing spatiotemporal LUR approaches share a common limitation: they treat temporal variation through model structure (separate hourly models, time-indexed covariates) rather than as an explicit dynamical process. This distinction has important consequences. First, uncertainty is typically quantified cross-sectionally at each time point, without propagation of estimation error across the temporal sequence. Second, predictions at adjacent time steps are treated as conditionally independent given covariates, precluding the temporal smoothing that could improve estimates during periods of noisy or missing observations. Third, parameter estimation proceeds separately for spatial and temporal components, forgoing the efficiency gains available from joint inference. These limitations become acute when the objective shifts from retrospective exposure assessment toward real-time forecasting, where principled handling of temporal dynamics and associated uncertainties is critical.</p>
+</blockquote>
+<hr>
+</section>
+<section id="general-comment-3" class="level3">
+<h3 class="anchored" data-anchor-id="general-comment-3">General Comment 3</h3>
+<blockquote class="blockquote">
+<p><em>“Results could be improved, as far as how the figures are made legible and understandable. More connection to the real-world case study and data would also help.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> All figures have been regenerated with improved clarity: - Increased font sizes for axis labels and legends - Added colorbars with explicit units to all spatial plots - Expanded figure captions to be self-contained (see responses to Specific Comment 13) - Added panel labels (a), (b), (c), (d) for multi-panel figures - Used colorblind-friendly palettes (viridis)</p>
+<p>We have also strengthened the connection to the Dublin case study throughout the Results section, including specific references to geographic features (M50 motorway corridor, city centre), policy context (EU Ambient Air Quality Directive), and practical implications for exposure assessment.</p>
+<hr>
+</section>
+</section>
+<section id="response-to-specific-comments" class="level2">
+<h2 class="anchored" data-anchor-id="response-to-specific-comments">Response to Specific Comments</h2>
+<section id="specific-comment-1.1" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-1.1">Specific Comment 1.1</h3>
+<blockquote class="blockquote">
+<p><em>“The contribution relies on generic discussion of different vague modeling concepts (static LUR versus dynamic, state space models, etc.). More context of the contribution would be helpful, beyond simply saying that machine learning models are not interpretable. For example, are GAM-LUR models the standard of practice?”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have revised the cover letter and Introduction to provide specific context. GAM-LUR is indeed increasingly adopted as a methodologically rigorous alternative to linear LUR, and we now cite key methodological papers establishing this.</p>
+<p><strong>Revised Introduction (Paragraph 6):</strong></p>
+<blockquote class="blockquote">
+<p>The framework offers three principal contributions relative to existing spatiotemporal LUR methodology. First, it provides coherent uncertainty quantification: posterior distributions over latent pollution states incorporate both spatial covariate uncertainty and temporal process noise, yielding prediction intervals with demonstrably better calibration than static alternatives. Second, it enables temporal smoothing that separates signal from noise in high-frequency monitoring data, improving estimates during periods of sensor dropout or anomalous readings. Third, through adaptive matrix representations (dense for small networks, sparse block-diagonal for large ones), the approach scales to thousands of spatial locations while maintaining computational tractability—addressing a practical barrier that has limited SSM adoption in urban air quality applications.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-1.2" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-1.2">Specific Comment 1.2</h3>
+<blockquote class="blockquote">
+<p><em>“The novelty of the work should not really rest on implementing in Python or Numpy, which seem to be standards of practice in current times. Also it was curious that the authors say that the framework is ‘sharable upon reasonable request’ but also that it is ‘open source’ – a contradiction. I also noted that the GitHub link is currently empty…”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We apologize for this oversight. The GitHub repository has now been fully populated with: - Complete source code as a pip-installable Python package - Comprehensive documentation and docstrings - Test suite with pytest - Example scripts including paper reproduction - MIT License</p>
+<p>We have removed claims about implementation novelty. The novelty rests on the <em>model formulation</em> (embedding LUR within an SSM framework) and <em>demonstrated performance</em>, not the implementation technology.</p>
+<p><strong>Revised text (end of Introduction):</strong></p>
+<blockquote class="blockquote">
+<p>All code and data preprocessing workflows are publicly available at https://github.com/GabrielOduori/lur_space_state_model to facilitate replication.</p>
+</blockquote>
+<p><strong>Revised text (Section 3.7 Implementation):</strong></p>
+<blockquote class="blockquote">
+<p>The complete framework was implemented in Python 3.10. Key dependencies include NumPy (Harris et al., 2020) for array operations, SciPy (Virtanen et al., 2020) for sparse matrices and numerical optimisation, pyGAM (Servén and Brummitt, 2018) for the GAM component, and Matplotlib (Hunter, 2007) for visualisation. SHAP (Lundberg and Lee, 2017) was used for feature importance analysis.</p>
+<p>Source code is available at https://github.com/GabrielOduori/lur_space_state_model. Processed data and intermediate outputs are archived on Zenodo (https://zenodo.org/uploads/16534138).</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-1.3" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-1.3">Specific Comment 1.3</h3>
+<blockquote class="blockquote">
+<p><em>“A ‘reduction in RMSE’ is OK, but without proper context this is not helpful by itself. What is the RMSE being compared to?”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We now explicitly state the baseline in both the Abstract and Results.</p>
+<p><strong>Revised Abstract:</strong></p>
+<blockquote class="blockquote">
+<p>Applied to hourly nitrogen dioxide (NO₂) observations from Dublin, Ireland, integrating regulatory monitors, TROPOMI satellite retrievals, and SCATS traffic data, the hybrid model achieves root mean square error of 0.53 µg/m³ compared to 1.41 µg/m³ for a static GAM-LUR baseline (62% reduction), improves the coefficient of determination from R² = −0.15 to R² = 0.84, and produces 95% prediction intervals with near-nominal coverage.</p>
+</blockquote>
+<p><strong>Revised Introduction (Paragraph 7):</strong></p>
+<blockquote class="blockquote">
+<p>We demonstrate the framework using hourly NO₂ data from Dublin, Ireland, integrating observations from regulatory monitors, TROPOMI satellite retrievals, SCATS traffic counts, and OpenStreetMap land use features. Relative to a static GAM-LUR baseline fitted on identical covariates, the hybrid model achieves a 62% reduction in root mean square error (RMSE from 1.41 to 0.53 µg/m³) and improves the coefficient of determination from R² = −0.15 to R² = 0.84. Critically, the 95% prediction intervals achieve near-nominal coverage, whereas the static model systematically underestimates uncertainty.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-2" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-2">Specific Comment 2</h3>
+<blockquote class="blockquote">
+<p><em>“The highlights are inadequate (‘A novel hybrid modelling framework’ and ‘Scalability and practical applications’) – they should somewhat stand on their own to explain the main points of the work.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have completely rewritten the highlights to be self-contained and informative.</p>
+<p><strong>Revised Highlights:</strong></p>
+<blockquote class="blockquote">
+<ul>
+<li>Hybrid GAM-LUR-SSM framework integrates spatial land use regression with temporal state space dynamics</li>
+<li>Expectation-Maximisation algorithm jointly estimates transition and noise covariance parameters</li>
+<li>62% RMSE reduction over static GAM-LUR baseline (0.53 vs 1.41 µg/m³) for Dublin NO₂</li>
+<li>95% prediction intervals achieve near-nominal coverage through principled uncertainty propagation</li>
+<li>Block-diagonal Kalman filtering enables scalable inference for 8,700+ spatial locations</li>
+<li>Open-source Python implementation with reproducible workflow</li>
+</ul>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-3" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-3">Specific Comment 3</h3>
+<blockquote class="blockquote">
+<p><em>“In the abstract, the opening ‘Models are useful…’ is too vague for our journal – which is all about modeling! The sentence that starts ‘This paper introduces…’ could be a better opening…”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have rewritten the Abstract to open with the specific methodological gap rather than a generic statement.</p>
+<p><strong>Revised Abstract:</strong></p>
+<blockquote class="blockquote">
+<p>Land Use Regression (LUR) models are widely used for urban air pollution mapping, yet existing spatiotemporal extensions treat temporal variation through model structure—separate hourly models, time-indexed covariates—rather than as an explicit dynamical process. This limits their capacity for uncertainty propagation, temporal smoothing, and principled forecasting. We propose a hybrid framework that integrates Generalised Additive Model (GAM)-based LUR with linear Gaussian State Space Models (SSMs) to address these limitations. The GAM component captures persistent spatial heterogeneity through smooth functions of land use, road network, and traffic covariates. Residuals from this spatial model are then modelled as a latent dynamical process via an SSM, with parameters estimated jointly using an Expectation-Maximisation algorithm and inference performed through Kalman filtering and Rauch-Tung-Striebel smoothing. Adaptive matrix representations—dense, sparse, or block-diagonal depending on network size—enable scalable inference for thousands of spatial locations. Applied to hourly nitrogen dioxide (NO₂) observations from Dublin, Ireland, integrating regulatory monitors, TROPOMI satellite retrievals, and SCATS traffic data, the hybrid model achieves root mean square error of 0.53 µg/m³ compared to 1.41 µg/m³ for a static GAM-LUR baseline (62% reduction), improves the coefficient of determination from R² = −0.15 to R² = 0.84, and produces 95% prediction intervals with near-nominal coverage. The framework offers coherent uncertainty quantification, optimal temporal smoothing, and computational tractability, advancing spatiotemporal LUR methodology for urban air quality assessment. Code and data are openly available.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-4" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-4">Specific Comment 4</h3>
+<blockquote class="blockquote">
+<p><em>“In general, all acronyms should be defined, such as ESCAPE on page 2.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> All acronyms are now defined on first use. ESCAPE is defined in the revised Introduction.</p>
+<p><strong>Revised text:</strong></p>
+<blockquote class="blockquote">
+<p>Originally introduced by Briggs et al.&nbsp;(1997) and subsequently refined in large-scale studies such as ESCAPE (European Study of Cohorts for Air Pollution Effects; Beelen et al., 2013), LUR models relate monitored pollutant concentrations to geographic predictors—road proximity, land use classifications, population density—via regression.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-5" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-5">Specific Comment 5</h3>
+<blockquote class="blockquote">
+<p><em>“At the end of page 2, I would suggest avoiding the style of bullet points so popular with ChatGPT and other LLMs. The first bullet: ‘Preserves interpretability: GAMs retain…’ is odd…”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have removed all bullet-point lists from the Introduction and converted them to flowing prose. The contributions are now presented as a cohesive paragraph.</p>
+<p><strong>Revised Introduction (Paragraph 6):</strong></p>
+<blockquote class="blockquote">
+<p>The framework offers three principal contributions relative to existing spatiotemporal LUR methodology. First, it provides coherent uncertainty quantification: posterior distributions over latent pollution states incorporate both spatial covariate uncertainty and temporal process noise, yielding prediction intervals with demonstrably better calibration than static alternatives. Second, it enables temporal smoothing that separates signal from noise in high-frequency monitoring data, improving estimates during periods of sensor dropout or anomalous readings. Third, through adaptive matrix representations (dense for small networks, sparse block-diagonal for large ones), the approach scales to thousands of spatial locations while maintaining computational tractability—addressing a practical barrier that has limited SSM adoption in urban air quality applications.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-6" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-6">Specific Comment 6</h3>
+<blockquote class="blockquote">
+<p><em>“The introduction’s treatment of spatiotemporal modeling is severely lacking. The authors say ‘Whilst different flavours of LUR methods exist [4]’ they seem to argue that the static models are missing the dynamic aspect. But reference [4] includes multiple categories of spatiotemporal modeling…”</em></p>
+</blockquote>
+<p><strong>Response:</strong> This is an important point and we thank the reviewer for highlighting it. We have substantially revised the Introduction and Section 2 to properly acknowledge the existing spatiotemporal LUR literature, including the comprehensive taxonomy in Ma et al.&nbsp;(2024).</p>
+<p><strong>Revised Section 2.1 (From Static to Spatiotemporal Land Use Regression):</strong></p>
+<blockquote class="blockquote">
+<p>Land Use Regression emerged in the 1990s as a cost-effective alternative to dense monitoring networks for characterising intra-urban air pollution variability (Briggs et al., 1997). The core premise is straightforward: pollutant concentrations measured at a limited number of locations can be related to spatially referenced predictors—road proximity, traffic intensity, land use composition, population density—via regression, enabling prediction across unmonitored sites. The ESCAPE project (Beelen et al., 2013) established standardised protocols that have since been widely adopted, and Hoek et al.&nbsp;(2008) provide an authoritative early review of model components and performance.</p>
+<p>Classical LUR models are inherently cross-sectional: they estimate time-averaged concentrations (typically annual means) and assume that predictor-response relationships remain constant over the averaging period. This static formulation is adequate for long-term exposure assessment in epidemiological cohorts but poorly suited to applications requiring finer temporal resolution—short-term health impact studies, real-time public advisories, or evaluation of transient interventions such as traffic restrictions.</p>
+<p>Recognising this limitation, researchers have pursued several strategies to incorporate temporal dynamics into the LUR framework. Ma et al.&nbsp;(2024) categorise these approaches in their comprehensive review spanning 2011–2023:</p>
+<p><em>Temporally stratified models.</em> The most direct extension involves fitting separate LUR models for different time periods. Masiol et al.&nbsp;(2018) developed 24 distinct hourly PM models, each with 16–26 predictors and R² values ranging from 0.63 to 0.77. Don et al.&nbsp;(2013) compared hourly black carbon models using static versus dynamic covariates, concluding that independent hourly models outperformed pooled approaches with dummy variables. While effective, this strategy multiplies computational burden, prohibits information sharing across time points, and provides no mechanism for temporal smoothing or uncertainty propagation.</p>
+<p><em>Time-varying covariates.</em> An alternative approach retains a unified model structure but incorporates predictors that vary temporally—meteorological variables, satellite retrievals, or real-time traffic counts. Rahman et al.&nbsp;(2020) achieved R² values of 0.64–0.88 for hourly particle number concentrations in Brisbane using Random Forest with dynamic meteorological inputs. Wang et al.&nbsp;(2023) integrated TROPOMI satellite data with ground observations in a geostatistical ST-LUR framework for Shanghai, estimating daily Air Quality Index at 100-metre resolution. These models capture covariate-driven temporal variation but treat residual temporal structure as noise rather than signal.</p>
+<p><em>Machine learning methods.</em> Flexible algorithms including Random Forest, gradient boosting, and neural networks can implicitly learn complex spatiotemporal interactions when provided appropriate feature engineering (Yang et al., 2018; Xu et al., 2019). However, their black-box nature limits interpretability—a significant drawback when policy applications require understanding <em>why</em> concentrations vary, not merely predicting <em>that</em> they vary. Hybrid approaches combining machine learning with geostatistical methods (e.g., residual kriging) partially address spatial correlation but typically do not model temporal dynamics explicitly (Wu et al., 2018).</p>
+<p><em>Geostatistical extensions.</em> Spatiotemporal kriging and its variants model correlation structures across both space and time, often combined with LUR mean functions (Sampson et al., 2011; Xu et al., 2019). These approaches can interpolate and smooth observations but require specification of space-time covariance functions that may not align with the mechanistic drivers of pollution dynamics. Computational costs scale poorly with the number of observations, limiting applicability to dense sensor networks.</p>
+<p>Despite this methodological diversity, a common thread runs through existing spatiotemporal LUR approaches: temporal variation is accommodated through model <em>structure</em> (separate models, time-indexed covariates, flexible learners) rather than treated as an explicit <em>dynamical process</em>. This distinction carries three practical consequences that motivate the present work:</p>
+<p>First, <strong>uncertainty quantification remains cross-sectional</strong>. Prediction intervals at each time point reflect estimation error in model parameters and residual variance but do not account for how uncertainty evolves and propagates through time. When observations are missing or anomalous, static models have no principled basis for borrowing strength from adjacent time points.</p>
+<p>Second, <strong>temporal smoothing is implicit rather than principled</strong>. Time-varying covariate models smooth predictions indirectly through the temporal autocorrelation of their inputs (e.g., meteorology), but this smoothing is not optimised for the pollution process itself. Separate hourly models forgo smoothing entirely, treating each time slice as independent.</p>
+<p>Third, <strong>parameter estimation is fragmented</strong>. Fitting separate models for each time period discards information about the underlying process stability; pooled models with time covariates confound spatial and temporal effects. Neither approach exploits the sequential structure of the data for efficient joint inference.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-7" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-7">Specific Comment 7</h3>
+<blockquote class="blockquote">
+<p><em>“In my opinion, section 2.1 is too general and is not adding value. Again, if spatio-temporal LUR models already exist, the focus of the background section in this paper should be to address the <em>existing</em> spatiotemporal LUR and then put into context why the authors’ new method is a good contribution.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have completely rewritten Section 2. The original general regression primer has been removed. The new Section 2.1 (shown above) now directly engages with existing spatiotemporal LUR approaches and clearly articulates the gaps our method addresses.</p>
+<p><strong>New Section 2.3 (Bridging the Gap: Motivation for a Hybrid Framework):</strong></p>
+<blockquote class="blockquote">
+<p>The preceding review reveals complementary strengths and limitations in the two modelling traditions. LUR methods excel at capturing spatial heterogeneity through interpretable covariate relationships but lack principled mechanisms for temporal dynamics, uncertainty propagation, and adaptive smoothing. SSMs provide exactly these capabilities but have been applied primarily to aggregate time series without the spatial granularity that urban air quality assessment demands.</p>
+<p>A hybrid framework integrating GAM-based LUR with State Space modelling can leverage the strengths of both approaches. The GAM component captures the persistent spatial structure attributable to land use, road networks, and other geographic features—the “fixed” component of the pollution field that varies across space but remains relatively stable over short time horizons. The SSM component then models the temporal evolution of residuals: the deviations from land-use-explained concentrations driven by traffic fluctuations, meteorological variation, and other time-varying factors that the spatial model cannot anticipate.</p>
+<p>This decomposition offers several advantages over existing spatiotemporal LUR approaches:</p>
+<p><strong>Principled uncertainty quantification.</strong> The SSM provides posterior distributions over latent states at each time point, with covariances that propagate through the Kalman recursions. Prediction intervals naturally widen during data gaps and narrow as observations accumulate, reflecting the actual information content of the monitoring record.</p>
+<p><strong>Optimal temporal smoothing.</strong> The Rauch-Tung-Striebel smoother produces state estimates that optimally balance fidelity to observations against process model constraints. Noisy measurements are attenuated; missing values are imputed using temporal context. This smoothing is principled in the sense of minimising mean squared error under the assumed model.</p>
+<p><strong>Joint parameter estimation.</strong> The EM algorithm estimates transition dynamics, process noise, and observation noise simultaneously, exploiting the full spatiotemporal structure of the data. Information flows across both time (through the Kalman recursions) and space (through the shared model parameters), improving efficiency relative to fragmented estimation strategies.</p>
+<p><strong>Scalability.</strong> While full SSM inference scales cubically with state dimension—a prohibitive cost for large sensor networks—structured approximations (diagonal covariances, block decompositions, sparse matrix representations) can reduce complexity to near-linear scaling, making the approach practical for urban-scale applications with thousands of spatial locations.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-8" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-8">Specific Comment 8</h3>
+<blockquote class="blockquote">
+<p><em>“Page 7 has another set of bullet points that do not flow with the rest of the text. The authors should look through the paper and reduce the number of times they mention that ‘LUR methods cannot account for time-varying phenomena’; this bullet list also brings up the TROPOMI issue, which the readers would not really understand at this point.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> The bullet points on page 7 have been removed and integrated into the flowing prose of Section 2.1 (shown above). The statement about LUR limitations now appears once, in proper context. TROPOMI is now introduced in Section 3.2.2 (Data Sources) with appropriate explanation before being referenced elsewhere.</p>
+<p><strong>Revised Section 3.2.2 (Satellite NO₂ Observations):</strong></p>
+<blockquote class="blockquote">
+<p>The TROPOspheric Monitoring Instrument (TROPOMI) aboard Sentinel-5P provides daily observations of tropospheric NO₂ vertical column density (VCD) at approximately 5.5 × 3.5 km resolution (Griffin et al., 2019). TROPOMI’s sun-synchronous orbit yields overpasses between 11:00–15:00 local time; at Dublin’s latitude (~53.3°N), partial swath overlap occasionally permits two valid retrievals per day.</p>
+<p>Level-2 NO₂ products were accessed via the Google Earth Engine API. For each grid cell centroid, we extracted cloud-screened VCD values (mol/m²) and converted to near-surface concentration estimates (µg/m³) following Savenets (2021):</p>
+<p>C = (C_col / H) × M × A</p>
+<p>where C_col is the column density, H is the effective mixing layer height (obtained from ERA5 reanalysis), M = 46.01 g/mol is the molar mass of NO₂, and A = 1000 is a unit conversion factor. We acknowledge that this conversion introduces uncertainty, particularly under conditions of strong vertical stratification; however, the satellite-derived values serve primarily as a spatially extensive covariate rather than the target variable.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-9" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-9">Specific Comment 9</h3>
+<blockquote class="blockquote">
+<p><em>“On page 8, the authors re-introduce the concept that they are looking at NO2, which has already been mentioned many times. Many ‘re-introductions’ exist; for example, acronyms are re-defined on page 18.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have carefully reviewed the entire manuscript and removed all re-introductions. NO₂ is introduced once in Section 1 (Introduction) with its health relevance, and referred to simply as “NO₂” thereafter. All acronyms are defined on first use only—we have removed duplicate definitions on page 18 and elsewhere.</p>
+<hr>
+</section>
+<section id="specific-comment-10" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-10">Specific Comment 10</h3>
+<blockquote class="blockquote">
+<p><em>“The concept of feature selection (section 3.6) could also be framed as part of the study’s contribution in the introduction.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We now mention the multi-stage feature selection pipeline as a methodological element in the Introduction, and have repositioned it more prominently in Section 3.</p>
+<p><strong>Added to Introduction (Paragraph 7):</strong></p>
+<blockquote class="blockquote">
+<p>The framework incorporates a structured feature selection pipeline—combining correlation-based filtering, variance inflation factor screening, and Random Forest importance ranking—to address the high-dimensional covariate space typical of LUR applications.</p>
+</blockquote>
+<p><strong>Revised Section 3.3.2 (Feature Selection):</strong></p>
+<blockquote class="blockquote">
+<p>Given the high-dimensional predictor space (291 candidate variables), a structured feature selection pipeline was applied prior to GAM fitting to mitigate multicollinearity and improve interpretability. The pipeline comprised three stages:</p>
+<p><strong>Stage 1: Correlation-based filtering.</strong> For each pair of predictors with absolute Pearson correlation exceeding 0.8, the variable with lower variance was removed. This step reduced redundancy among spatially correlated buffer-distance features.</p>
+<p><strong>Stage 2: Variance Inflation Factor (VIF) screening.</strong> Remaining predictors were evaluated for multicollinearity via VIF (Hair et al., 2019). Variables with VIF &gt; 10 were iteratively removed until all retained predictors satisfied the threshold.</p>
+<p><strong>Stage 3: Importance-based selection.</strong> A Random Forest regressor (Breiman, 2001) was trained on the reduced predictor set, and feature importances were extracted. The top 30 predictors by importance were retained for the final GAM, supplemented by domain-informed “force-keep” variables (traffic volume, motorway proximity) to ensure policy-relevant covariates remained in the model regardless of their data-driven ranking.</p>
+<p>This pipeline reduced the predictor set from 291 to 56 variables after correlation and VIF filtering, and to 15 variables in the final GAM specification (Table 1).</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-11" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-11">Specific Comment 11</h3>
+<blockquote class="blockquote">
+<p><em>“I’m not sure how useful Table 1 is by itself; perhaps visualization or analysis of the input data would be helpful to show.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We have added SHAP (SHapley Additive exPlanations) visualization as Figure 3 to complement Table 1. The SHAP summary plot shows both feature importance rankings and the direction/magnitude of effects, providing richer insight than the table alone.</p>
+<p><strong>Revised Figure 3 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 3: Feature importance analysis using SHAP values.</strong> Bee swarm plot showing the contribution of each predictor to NO₂ predictions in the GAM-LUR model. Features are arranged vertically in descending order of mean absolute SHAP value (most important at top). Each point represents one observation; horizontal position indicates the SHAP value (impact on model output in µg/m³), with positive values (right) indicating increased predicted NO₂ and negative values (left) indicating decreased predictions. Point colour encodes the original feature value: red indicates high values, blue indicates low values. Key findings: motorway proximity and density within 1,000 m are the strongest predictors; industrial and residential land use at 1,050 m buffers show moderate importance; traffic volume from SCATS detectors contributes less than static road network features, suggesting that spatial configuration dominates over temporal traffic variation in explaining NO₂ levels.</p>
+</blockquote>
+<hr>
+</section>
+<section id="specific-comment-12" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-12">Specific Comment 12</h3>
+<blockquote class="blockquote">
+<p><em>“On the bottom of page 19, a figure seems to be missing?”</em></p>
+</blockquote>
+<p><strong>Response:</strong> We apologize for this error, which was a LaTeX cross-reference issue. The missing figure reference has been corrected and all figure cross-references have been verified.</p>
+<hr>
+</section>
+<section id="specific-comment-13" class="level3">
+<h3 class="anchored" data-anchor-id="specific-comment-13">Specific Comment 13</h3>
+<blockquote class="blockquote">
+<p><em>“It is difficult to interpret what figure 4 is attempting to show, and the caption could be improved. The same comment applies to the other figures, such as figure 6, where the colors are not clearly defined, the legends are hard to read, and the caption is uninformative.”</em></p>
+</blockquote>
+<p><strong>Response:</strong> All figure captions have been substantially expanded to be self-contained and informative. Figures have been regenerated with larger fonts, explicit color definitions, and panel labels.</p>
+<p><strong>Revised Figure 4 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 4: Temporal evolution of observed and smoothed NO₂ concentrations at six representative grid locations.</strong> Each panel displays the time series for one spatial location over the 50-day analysis period (x-axis: days; y-axis: standardised NO₂ residuals after removing the GAM spatial mean). Black points show observed values; solid blue lines show Kalman-smoothed state estimates; shaded blue bands indicate 95% posterior credible intervals. Location IDs (top of each panel) correspond to grid cell indices in the spatial domain. The smoothed estimates filter out high-frequency noise while preserving systematic temporal patterns. Credible intervals widen during periods of missing data and narrow when observations are available, demonstrating the model’s adaptive uncertainty quantification. Note the common diurnal and weekly patterns across locations, reflecting shared temporal drivers (traffic cycles, meteorology) captured by the state space dynamics.</p>
+</blockquote>
+<p><strong>Revised Figure 5 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 5: Spatial distribution of NO₂ concentrations across three time points.</strong> Top row: observed NO₂ residuals (after removing spatial mean) at Day 0 (left), Day 13 (centre), and Day 26 (right). Bottom row: corresponding Kalman-smoothed estimates for the same days. Colour scale indicates NO₂ concentration anomaly (µg/m³ relative to the GAM-predicted spatial mean), with warmer colours (yellow–red) denoting positive anomalies (higher than land-use-predicted levels) and cooler colours (blue) denoting negative anomalies. Axes show geographic coordinates (longitude, latitude in decimal degrees). The observed fields (top) exhibit considerable spatial noise; the smoothed fields (bottom) reveal coherent spatial structure while attenuating measurement error. Notable features include elevated concentrations along the M50 motorway corridor (western edge) and in the city centre, consistent with traffic emission patterns.</p>
+</blockquote>
+<p><strong>Revised Figure 6 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 6: Expectation-Maximisation algorithm convergence diagnostics.</strong> Four panels tracking the EM estimation procedure across iterations (x-axis). <strong>Top left:</strong> Log-likelihood values (×10⁶) showing monotonic increase and convergence after approximately five iterations, consistent with theoretical EM properties. <strong>Top right:</strong> Evolution of key parameter traces—tr(<strong>T</strong>) (state transition matrix trace, blue), tr(<strong>Q</strong>) (process noise covariance trace, red), and tr(<strong>R</strong>) (observation noise covariance trace, green)—demonstrating stabilisation of all parameters. <strong>Bottom left:</strong> Log-likelihood increment (absolute change between successive iterations) on logarithmic scale, declining below the 10⁻⁶ convergence threshold by iteration 5. <strong>Bottom right:</strong> Parameter change magnitudes |Δtr(<strong>T</strong>)|, |Δtr(<strong>Q</strong>)|, and |Δtr(<strong>R</strong>)| showing rapid decay. These diagnostics confirm successful convergence of the EM algorithm and stability of the final parameter estimates.</p>
+</blockquote>
+<p><strong>Revised Figure 7 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 7: Model performance diagnostics comparing observed and smoothed estimates.</strong> Four panels evaluating the hybrid GAM-SSM model. <strong>Top left:</strong> Scatter plot of observed versus Kalman-smoothed NO₂ residuals across all space-time points. Pearson correlation r = 0.946 (annotated) indicates strong agreement; dashed red line shows the 1:1 reference. <strong>Top right:</strong> Temporal variance comparison showing observed variance (black) and smoothed variance (blue) over the 50-day period; variance reduction demonstrates effective noise filtering while preserving signal dynamics. <strong>Bottom left:</strong> Spatial variance comparison; each point represents one grid location, with observed spatial variance (x-axis) plotted against smoothed spatial variance (y-axis). Points below the 1:1 line indicate variance reduction through smoothing; the close alignment suggests spatial structure is preserved. <strong>Bottom right:</strong> Spatial distribution of location-specific RMSE (colour scale: 0.4–0.8 µg/m³). Higher errors concentrate in the city centre and along major arterials, likely reflecting greater NO₂ variability in high-traffic areas that challenges even the hybrid model.</p>
+</blockquote>
+<p><strong>Revised Figure 8 caption:</strong></p>
+<blockquote class="blockquote">
+<p><strong>Figure 8: Residual diagnostics for the hybrid GAM-SSM model.</strong> Six panels assessing model adequacy. <strong>Top left:</strong> Residuals (observed minus smoothed) versus fitted values; random scatter around zero with no systematic pattern indicates absence of bias and heteroscedasticity. <strong>Top centre:</strong> Quantile-quantile (Q-Q) plot comparing residual distribution to theoretical normal quantiles; close adherence to the diagonal confirms approximate normality, with minor deviation in the upper tail suggesting slight positive skewness. <strong>Top right:</strong> Histogram of residuals with overlaid normal density curve (red); the empirical distribution closely matches the theoretical, supporting the Gaussian assumption. <strong>Bottom left:</strong> Temporal residual pattern showing daily mean residuals (blue line) with ±1 standard deviation bands (grey shading); residuals fluctuate around zero throughout the 50-day period, though excursions during days 15–20 and 35–40 suggest episodic model underperformance potentially linked to unmeasured meteorological events. <strong>Bottom centre:</strong> Spatial residual distribution across the study domain; absence of systematic clustering indicates no unmodelled spatial structure. <strong>Bottom right:</strong> Residual autocorrelation function (ACF) for lags 0–50; correlations remain within acceptable bounds (±0.05, dashed lines) for all lags, confirming that temporal dependencies have been adequately captured by the state space component.</p>
+</blockquote>
+<hr>
+</section>
+</section>
+<section id="summary-of-changes" class="level2">
+<h2 class="anchored" data-anchor-id="summary-of-changes">Summary of Changes</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 52%">
+<col style="width: 47%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Section</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Highlights</strong></td>
+<td>Completely rewritten to be self-contained and quantitative</td>
+</tr>
+<tr class="even">
+<td><strong>Abstract</strong></td>
+<td>New opening addressing specific gap; added baseline comparison</td>
+</tr>
+<tr class="odd">
+<td><strong>Introduction</strong></td>
+<td>Rewritten to acknowledge ST-LUR literature; contributions in prose</td>
+</tr>
+<tr class="even">
+<td><strong>Section 2</strong></td>
+<td>Removed basic primer; added comprehensive ST-LUR review; clear gap statement</td>
+</tr>
+<tr class="odd">
+<td><strong>Section 3</strong></td>
+<td>Restructured; TROPOMI properly introduced; feature selection elevated</td>
+</tr>
+<tr class="even">
+<td><strong>All Figures</strong></td>
+<td>Regenerated with larger fonts, colorbars, panel labels</td>
+</tr>
+<tr class="odd">
+<td><strong>All Captions</strong></td>
+<td>Expanded to be self-contained with panel-by-panel descriptions</td>
+</tr>
+<tr class="even">
+<td><strong>GitHub</strong></td>
+<td>Repository fully populated with code, tests, documentation</td>
+</tr>
+<tr class="odd">
+<td><strong>Throughout</strong></td>
+<td>Removed redundancies, duplicate acronym definitions, bullet points</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p>We believe these revisions substantially address all reviewer concerns. We thank the Editor and reviewers for their constructive feedback, which has significantly improved the manuscript.</p>
+<p>Sincerely,</p>
+<p>Gabriel Oduori, Chiara Cocco, Payam Sajadi, Francesco Pilla University College Dublin</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

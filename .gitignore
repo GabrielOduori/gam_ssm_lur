@@ -8,6 +8,8 @@ __pycache__/
 
 data/*
 
+RESPONSE_TO_REVIEWERS.md
+
 # Distribution / packaging
 .Python
 build/
