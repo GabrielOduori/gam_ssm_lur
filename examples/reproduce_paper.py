@@ -523,13 +523,13 @@ def create_residual_diagnostics(hybrid_result: dict, output_path: Path):
     
     # ACF of residuals
     ax = axes[1, 2]
-    from statsmodels.graphics.tsaplots import plot_acf
     # Use mean residuals across space
     try:
+        from statsmodels.graphics.tsaplots import plot_acf
         plot_acf(daily_mean, lags=30, ax=ax, alpha=0.05)
         ax.set_title('(f) Residual ACF')
-    except:
-        # Fallback if statsmodels not available
+    except Exception:
+        # Fallback if statsmodels is unavailable
         nlags = 30
         acf = np.correlate(daily_mean - daily_mean.mean(), daily_mean - daily_mean.mean(), mode='full')
         acf = acf[len(acf)//2:]
