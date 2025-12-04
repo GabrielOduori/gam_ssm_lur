@@ -161,6 +161,16 @@ class SpatialGAM:
         self.max_iter = max_iter
         self.tol = tol
         
+        # pygam requires n_splines > spline_order; bump if user passes too few
+        if self.n_splines <= self.spline_order:
+            logger.info(
+                "Increasing n_splines from %d to %d to satisfy pygam constraint "
+                "n_splines > spline_order",
+                self.n_splines,
+                self.spline_order + 1,
+            )
+            self.n_splines = self.spline_order + 1
+        
         self.gam_: Optional[GAM] = None
         self.feature_names_: Optional[List[str]] = None
         self.is_fitted_ = False

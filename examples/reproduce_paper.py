@@ -23,10 +23,10 @@ import argparse
 import logging
 from pathlib import Path
 
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
 from output_utils import make_experiment_dirs
 
@@ -35,6 +35,24 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Default prefixes for spatial/traffic feature columns in merged datasets.
+# This list includes the provided columns plus a few common variants to stay backwards compatible.
+BASE_FEATURE_PREFIXES = [
+    "traffic_volume",
+    "scats_distance",
+    "motorway",
+    "industrial",
+    "industria",       # handle possible shortened column name
+    "traffic_signals", # if present
+    # Legacy/extra prefixes retained for compatibility
+    "commercial",
+    "residential",
+    "primary",
+    "secondary",
+    "trunk",
+    "tertiary",
+]
 
 
 def setup_paths(data_dir: Path, output_base: Path, run_name: str | None) -> dict:
@@ -54,11 +72,79 @@ def setup_paths(data_dir: Path, output_base: Path, run_name: str | None) -> dict
     return paths
 
 
+def _infer_feature_columns(df: pd.DataFrame, prefixes: list[str]) -> list[str]:
+    """Infer feature columns based on known prefixes."""
+    candidates = {col for prefix in prefixes for col in df.columns if col.startswith(prefix)}
+    return sorted(candidates)
+
+
+def _clean_merged_dataframe(
+    df: pd.DataFrame,
+    timestamp_col: str,
+    target_col: str,
+    fallback_target_col: str | None,
+    location_col: str,
+    lat_col: str,
+    lon_col: str,
+    feature_prefixes: list[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Clean merged dataset to handle missing/inf values and infer features."""
+    required = {timestamp_col, target_col, location_col, lat_col, lon_col}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in merged data: {', '.join(sorted(missing))}")
+    
+    df = df.copy()
+    
+    # Clean target, optionally filling missing values from fallback column
+    if fallback_target_col and fallback_target_col in df.columns:
+        df[target_col] = df[target_col].fillna(df[fallback_target_col])
+    
+    df = df.dropna(subset=[target_col])
+    df = df[~np.isinf(df[target_col])]
+    df.loc[df[target_col] < 0, target_col] = 0
+    if df.empty:
+        raise ValueError(
+            f"No rows remaining after cleaning target column '{target_col}'. "
+            "Check that the column exists and has non-null values, or set --fallback-target-col."
+        )
+    
+    # Clean coordinates
+    for coord in [lon_col, lat_col]:
+        if coord in df.columns:
+            df = df.dropna(subset=[coord])
+            df = df[~np.isinf(df[coord])]
+    
+    # Feature list (based on prefixes)
+    feature_cols = _infer_feature_columns(df, feature_prefixes)
+    # Optional satellite NO2 as feature if not the target column
+    if "no2_values" in df.columns and target_col != "no2_values":
+        feature_cols.append("no2_values")
+    if not feature_cols:
+        raise ValueError(
+            "No feature columns found using provided prefixes. "
+            "Check column names or extend BASE_FEATURE_PREFIXES."
+        )
+    
+    # Clean features (replace inf/NaN with median or 0)
+    clean_features = []
+    for f in feature_cols:
+        if f not in df.columns:
+            continue
+        df[f] = df[f].replace([np.inf, -np.inf], np.nan)
+        median = df[f].median()
+        df[f] = df[f].fillna(0 if pd.isna(median) else median)
+        clean_features.append(f)
+    
+    return df, clean_features
+
+
 def load_data(
     data_dir: Path,
     data_file: Path | None,
     timestamp_col: str,
     target_col: str,
+    fallback_target_col: str | None,
     location_col: str,
     lat_col: str,
     lon_col: str,
@@ -81,11 +167,19 @@ def load_data(
         if not data_file.exists():
             raise FileNotFoundError(f"Merged data file not found: {data_file}")
         
+        logger.info(f"Using merged data file: {data_file}")
+        
         df = pd.read_csv(data_file, parse_dates=[timestamp_col])
-        required = {timestamp_col, target_col, location_col, lat_col, lon_col}
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing required columns in merged data: {', '.join(sorted(missing))}")
+        df, feature_cols = _clean_merged_dataframe(
+            df=df,
+            timestamp_col=timestamp_col,
+            target_col=target_col,
+            fallback_target_col=fallback_target_col,
+            location_col=location_col,
+            lat_col=lat_col,
+            lon_col=lon_col,
+            feature_prefixes=BASE_FEATURE_PREFIXES,
+        )
         
         # Normalize column names for downstream code
         df = df.rename(columns={
@@ -98,8 +192,9 @@ def load_data(
         
         observations = df[["timestamp", "location_id", "no2", "lat", "lon"]].copy()
         
-        feature_cols = [c for c in df.columns if c not in {"timestamp", "no2"}]
-        features = df[feature_cols].drop_duplicates(subset=["location_id"]).reset_index(drop=True)
+        # Keep only the inferred/cleaned feature columns
+        selected_feature_cols = [c for c in feature_cols if c in df.columns and c not in {"timestamp", "no2"}]
+        features = df[["location_id"] + selected_feature_cols].drop_duplicates(subset=["location_id"]).reset_index(drop=True)
         
         logger.info(f"Loaded merged data: {len(observations)} observations across {len(features)} locations")
         validation_stations = None
@@ -496,6 +591,20 @@ def main():
     parser = argparse.ArgumentParser(description='Reproduce GAM-SSM-LUR paper results')
     parser.add_argument('--data-dir', type=Path, default=Path('data'),
                         help='Directory containing input data')
+    parser.add_argument('--data-file', type=Path, default=None,
+                        help='Path to merged CSV containing timestamp, target, location, coords, and all spatial features')
+    parser.add_argument('--timestamp-col', type=str, default='timestamp',
+                        help='Timestamp column in merged data')
+    parser.add_argument('--target-col', type=str, default='epa_no2',
+                        help='Target column (e.g., gold-standard EPA NO₂) in merged data')
+    parser.add_argument('--location-col', type=str, default='grid_id',
+                        help='Location ID column in merged data')
+    parser.add_argument('--lat-col', type=str, default='latitude',
+                        help='Latitude column in merged data')
+    parser.add_argument('--lon-col', type=str, default='longitude',
+                        help='Longitude column in merged data')
+    parser.add_argument('--fallback-target-col', type=str, default='no2_values',
+                        help='Optional column to fill missing target values (e.g., satellite NO₂)')
     parser.add_argument('--output-dir', type=Path, default=Path('results'),
                         help='Base directory for output files (each run gets a timestamped subfolder)')
     parser.add_argument('--run-name', type=str, default=None,
@@ -514,7 +623,16 @@ def main():
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
     
     # Load data
-    observations, features, validation_stations = load_data(args.data_dir)
+    observations, features, validation_stations = load_data(
+        data_dir=args.data_dir,
+        data_file=args.data_file,
+        timestamp_col=args.timestamp_col,
+        target_col=args.target_col,
+        fallback_target_col=args.fallback_target_col,
+        location_col=args.location_col,
+        lat_col=args.lat_col,
+        lon_col=args.lon_col,
+    )
     
     # Prepare arrays
     logger.info("Preparing data arrays...")

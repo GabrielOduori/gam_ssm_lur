@@ -185,6 +185,7 @@ class HybridGAMSSM:
         self._X_train: Optional[NDArray] = None
         self._y_train: Optional[NDArray] = None
         self._y_matrix: Optional[NDArray] = None  # Reshaped as (T, n_locations)
+        self._residual_matrix: Optional[NDArray] = None  # GAM residuals reshaped
         
         self.is_fitted_ = False
         
@@ -281,6 +282,7 @@ class HybridGAMSSM:
             
         logger.info(f"GAM fitted. R²={self.gam_.summary().r_squared:.4f}")
         logger.info(f"Residual matrix shape: {residual_matrix.shape}")
+        self._residual_matrix = residual_matrix
         
         # Step 2: Fit SSM on residuals
         logger.info("Step 2: Fitting SSM on GAM residuals")
@@ -628,6 +630,7 @@ class HybridGAMSSM:
             X_train=self._X_train,
             y_train=self._y_train,
             y_matrix=self._y_matrix,
+            residual_matrix=self._residual_matrix,
             location_ids=self.location_ids_,
             time_ids=self.time_ids_,
         )
@@ -677,8 +680,12 @@ class HybridGAMSSM:
         model._X_train = data['X_train']
         model._y_train = data['y_train']
         model._y_matrix = data['y_matrix']
+        model._residual_matrix = data['residual_matrix']
         model.location_ids_ = data['location_ids']
         model.time_ids_ = data['time_ids']
+        
+        # Recompute SSM filter/smoother results for predictions using stored residuals
+        model.ssm_._restore_inference(model._residual_matrix)
         
         model.n_locations_ = metadata['n_locations']
         model.n_times_ = metadata['n_times']

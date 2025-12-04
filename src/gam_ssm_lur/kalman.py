@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 from scipy import sparse
 from scipy.sparse import csr_matrix, diags
 from scipy.sparse.linalg import spsolve
+from scipy.linalg import cho_factor, cho_solve, solve_triangular
 
 
 @dataclass
@@ -392,36 +393,68 @@ class KalmanFilter:
         # Innovation
         innovation = observation - self._matrix_multiply(self.Z, predicted_mean)
         
-        # Innovation covariance F = Z P Z' + H
+        # Diagonal mode stays fully element-wise
         if self.mode == "diagonal":
             innovation_cov = self.Z**2 * predicted_covariance + self.H
-        else:
-            Z_P = self._matrix_multiply(self.Z, predicted_covariance)
-            Z_P_Z = self._matrix_multiply(Z_P, self._transpose(self.Z))
-            innovation_cov = self._add_matrices(Z_P_Z, self.H)
-            
-        # Kalman gain K = P Z' F^{-1}
-        if self.mode == "diagonal":
             kalman_gain = (predicted_covariance * self.Z) / (innovation_cov + self.regularization)
-        else:
-            P_Z = self._matrix_multiply(predicted_covariance, self._transpose(self.Z))
-            F_inv = self._inverse(innovation_cov)
-            kalman_gain = self._matrix_multiply(P_Z, F_inv)
-            
-        # Filtered mean
-        filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
-        
-        # Filtered covariance (Joseph form for numerical stability)
-        if self.mode == "diagonal":
+            filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
             filtered_cov = (1 - kalman_gain * self.Z) * predicted_covariance
+            ll = self._compute_log_likelihood(innovation, innovation_cov)
+            
+            return FilteredState(
+                mean=filtered_mean,
+                covariance=filtered_cov,
+                predicted_mean=predicted_mean,
+                predicted_covariance=predicted_covariance,
+                kalman_gain=kalman_gain,
+                log_likelihood=ll,
+            )
+        
+        # Shared computations for dense/block modes
+        Z_P = self._matrix_multiply(self.Z, predicted_covariance)
+        Z_P_Z = self._matrix_multiply(Z_P, self._transpose(self.Z))
+        innovation_cov = self._add_matrices(Z_P_Z, self.H)
+        P_Z = self._matrix_multiply(predicted_covariance, self._transpose(self.Z))
+        
+        if self.mode == "dense":
+            # Use Cholesky factorization once for both gain and likelihood
+            innovation_cov_reg = innovation_cov + self.regularization * np.eye(self.obs_dim)
+            try:
+                chol_factor, lower = cho_factor(
+                    innovation_cov_reg, lower=False, check_finite=False
+                )
+                # Solve F K' = P_Z' instead of forming F^{-1}
+                kalman_gain = cho_solve((chol_factor, lower), P_Z.T, check_finite=False).T
+                
+                filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
+                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
+                filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
+                filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
+                
+                # Log-likelihood using the same Cholesky factor
+                log_det = 2.0 * np.sum(np.log(np.diag(chol_factor)))
+                whitened_innov = solve_triangular(
+                    chol_factor, innovation, lower=lower, check_finite=False
+                )
+                quad_form = np.dot(whitened_innov, whitened_innov)
+                ll = -0.5 * (self.obs_dim * np.log(2 * np.pi) + log_det + quad_form)
+            except np.linalg.LinAlgError:
+                # Fallback to the more expensive inverse-based path
+                F_inv = self._inverse(innovation_cov)
+                kalman_gain = self._matrix_multiply(P_Z, F_inv)
+                filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
+                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
+                filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
+                filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
+                ll = self._compute_log_likelihood(innovation, innovation_cov)
         else:
+            # Block/sparse modes retain the existing solve strategy
+            kalman_gain = self._matrix_multiply(P_Z, self._inverse(innovation_cov))
+            filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
             I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
             filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
-            # Ensure symmetry
             filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
-            
-        # Log-likelihood
-        ll = self._compute_log_likelihood(innovation, innovation_cov)
+            ll = self._compute_log_likelihood(innovation, innovation_cov)
         
         return FilteredState(
             mean=filtered_mean,

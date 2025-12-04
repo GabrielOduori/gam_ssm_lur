@@ -510,6 +510,44 @@ class StateSpaceModel:
         if not self.is_fitted_:
             raise RuntimeError("Model not fitted. Call fit() first.")
             
+    def _restore_inference(self, observations: NDArray) -> None:
+        """Recompute filter/smoother results for a loaded model."""
+        obs = np.asarray(observations)
+        if obs.ndim != 2:
+            raise ValueError("observations must be 2D (T, obs_dim)")
+        
+        # Update cached dimensions if missing
+        if self._obs_dim is None:
+            self._obs_dim = obs.shape[1]
+        if self._T_len is None:
+            self._T_len = obs.shape[0]
+        
+        missing_mask = np.isnan(obs)
+        obs_clean = np.where(missing_mask, 0.0, obs) if missing_mask.any() else obs
+        missing_mask = missing_mask if missing_mask.any() else None
+        
+        kf = KalmanFilter(
+            state_dim=self.T_.shape[0],
+            obs_dim=self._obs_dim,
+            mode=self.scalability_mode,
+            regularization=self.regularization,
+        )
+        kf.initialize(
+            T=self.T_,
+            Z=self.Z_,
+            Q=self.Q_,
+            H=self.H_,
+            initial_mean=self.initial_mean_,
+            initial_covariance=self.initial_cov_,
+        )
+        
+        filter_result = kf.filter(obs_clean, missing_mask=missing_mask)
+        smoother_result = RTSSmoother(kf).smooth(filter_result)
+        
+        self.kf_ = kf
+        self.filter_result_ = filter_result
+        self.smoother_result_ = smoother_result
+            
     def save(self, filepath: str) -> None:
         """Save model to disk."""
         import pickle
