@@ -548,6 +548,200 @@ def create_residual_diagnostics(hybrid_result: dict, output_path: Path):
     plt.close()
 
 
+def create_spatial_comparison_map(
+    baseline: dict,
+    hybrid_result: dict,
+    observations: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """Side-by-side spatial comparison of GAM-LUR vs GAM-SSM mean predictions."""
+    model = hybrid_result['model']
+    preds = hybrid_result['predictions']
+    
+    # Location lookups
+    loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates()
+    
+    # Baseline per-location mean
+    baseline_df = pd.DataFrame({
+        'location_id': observations['location_id'],
+        'baseline_pred': baseline['predictions'],
+    }).groupby('location_id', as_index=False).mean()
+    
+    # Hybrid per-location mean over time
+    hybrid_means = preds.total.mean(axis=0)
+    hybrid_df = pd.DataFrame({
+        'location_id': model.location_ids_,
+        'hybrid_pred': hybrid_means,
+    })
+    
+    # Merge with coordinates
+    merged = loc_meta.merge(baseline_df, on='location_id').merge(hybrid_df, on='location_id')
+    
+    vmin = min(merged['baseline_pred'].min(), merged['hybrid_pred'].min())
+    vmax = max(merged['baseline_pred'].max(), merged['hybrid_pred'].max())
+    
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+    for ax, col, title in [
+        (axes[0], 'baseline_pred', 'GAM-LUR (mean over time)'),
+        (axes[1], 'hybrid_pred', 'GAM-SSM (mean over time)'),
+    ]:
+        sc = ax.scatter(merged['lon'], merged['lat'], c=merged[col], cmap='viridis', s=20,
+                        vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+        ax.set_xlabel('Longitude')
+        ax.set_ylabel('Latitude')
+        ax.grid(True, alpha=0.3)
+    cbar = fig.colorbar(sc, ax=axes, fraction=0.046, pad=0.04)
+    cbar.set_label('NO₂ (µg/m³)')
+    
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    logger.info(f"Saved spatial comparison map to {output_path}")
+    plt.close()
+
+
+def create_residual_hotspot_map(
+    hybrid_result: dict,
+    baseline: dict,
+    time_idx: np.ndarray,
+    loc_idx: np.ndarray,
+    observations: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """Visualize per-location RMSE for baseline vs hybrid (hotspots)."""
+    model = hybrid_result['model']
+    y_matrix = model._y_matrix
+    n_times, n_locs = y_matrix.shape
+    
+    def _reshape(values: np.ndarray) -> np.ndarray:
+        mat = np.full((n_times, n_locs), np.nan)
+        for v, t, l in zip(values, time_idx, loc_idx):
+            mat[t, l] = v
+        return mat
+    
+    baseline_matrix = _reshape(baseline['predictions'])
+    hybrid_matrix = hybrid_result['predictions'].total
+    
+    baseline_rmse = np.sqrt(np.nanmean((y_matrix - baseline_matrix) ** 2, axis=0))
+    hybrid_rmse = np.sqrt(np.nanmean((y_matrix - hybrid_matrix) ** 2, axis=0))
+    
+    loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates()
+    rmse_df = pd.DataFrame({
+        'location_id': model.location_ids_,
+        'baseline_rmse': baseline_rmse,
+        'hybrid_rmse': hybrid_rmse,
+    }).merge(loc_meta, on='location_id')
+    
+    vmin = min(rmse_df['baseline_rmse'].min(), rmse_df['hybrid_rmse'].min())
+    vmax = max(rmse_df['baseline_rmse'].max(), rmse_df['hybrid_rmse'].max())
+    
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+    for ax, col, title in [
+        (axes[0], 'baseline_rmse', 'GAM-LUR RMSE'),
+        (axes[1], 'hybrid_rmse', 'GAM-SSM RMSE'),
+    ]:
+        sc = ax.scatter(rmse_df['lon'], rmse_df['lat'], c=rmse_df[col], cmap='inferno',
+                        s=25, vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+        ax.set_xlabel('Longitude')
+        ax.set_ylabel('Latitude')
+        ax.grid(True, alpha=0.3)
+    cbar = fig.colorbar(sc, ax=axes, fraction=0.046, pad=0.04)
+    cbar.set_label('RMSE (µg/m³)')
+    
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    logger.info(f"Saved residual hotspot map to {output_path}")
+    plt.close()
+
+
+def create_shap_importance_plot(
+    baseline: dict,
+    X: np.ndarray,
+    feature_names: list[str],
+    output_path: Path,
+    max_samples: int = 800,
+) -> None:
+    """Create SHAP summary plot for the baseline GAM-LUR model."""
+    try:
+        import shap
+    except ImportError:
+        logger.warning("shap not installed; skipping SHAP plot")
+        return
+    
+    X_sample = X
+    if len(X) > max_samples:
+        idx = np.random.choice(len(X), size=max_samples, replace=False)
+        X_sample = X[idx]
+    
+    model = baseline['model']
+    
+    def predict_fn(x):
+        return model.predict(x)
+    
+    try:
+        explainer = shap.KernelExplainer(predict_fn, shap.sample(X_sample, min(200, len(X_sample))))
+        shap_values = explainer.shap_values(X_sample, nsamples=100)
+        shap.summary_plot(shap_values, X_sample, feature_names=feature_names, show=False)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        import matplotlib.pyplot as plt
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved SHAP summary plot to {output_path}")
+    except Exception as e:
+        logger.warning(f"SHAP plot skipped due to error: {e}")
+
+
+def create_morans_i_plot(residuals: np.ndarray, lats: np.ndarray, lons: np.ndarray, output_path: Path) -> None:
+    """Compute and plot Moran's I if esda/libpysal are available."""
+    try:
+        from libpysal.weights import KNN
+        from esda.moran import Moran
+    except ImportError:
+        logger.warning("libpysal/esda not installed; skipping Moran's I plot")
+        return
+    
+    coords = np.column_stack([lons, lats])
+    w = KNN.from_array(coords, k=8)
+    w.transform = "r"
+    m = Moran(residuals, w)
+    
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.hist(m.sim, bins=30, density=True, alpha=0.7, color='gray')
+    ax.axvline(m.I, color='red', linestyle='--', label=f"I = {m.I:.3f}")
+    ax.set_title("Moran's I (residual means)")
+    ax.set_xlabel("I simulated")
+    ax.legend()
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Saved Moran's I plot to {output_path}")
+
+
+def create_variogram_plot(residuals: np.ndarray, lats: np.ndarray, lons: np.ndarray, output_path: Path) -> None:
+    """Create empirical variogram plot if skgstat is available."""
+    try:
+        from skgstat import Variogram
+    except ImportError:
+        logger.warning("skgstat not installed; skipping variogram plot")
+        return
+    
+    coords = np.column_stack([lons, lats])
+    V = Variogram(coords, residuals, normalize=True, n_lags=12, maxlag='median')
+    fig = V.plot(show=False)
+    fig.set_figwidth(6)
+    fig.set_figheight(4)
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"Saved variogram plot to {output_path}")
+
+
 def create_observed_vs_predicted_plot(baseline: dict, hybrid_result: dict, output_path: Path):
     """Create Figure 7: Observed vs predicted comparison."""
     
@@ -723,6 +917,86 @@ def main():
     create_residual_diagnostics(
         hybrid,
         paths['figures_dir'] / 'fig8_residual_diagnostics.png'
+    )
+    
+    # Figure 9: Prediction intervals for one location (uncertainty)
+    def plot_uncertainty_for_location(model, predictions, output_path: Path, loc_id: int = 0):
+        """Plot observed/predicted with uncertainty bands for a single location."""
+        t_range = np.arange(model.n_times_)
+        plt.figure(figsize=(8, 4))
+        plt.fill_between(
+            t_range,
+            predictions.lower[:, loc_id],
+            predictions.upper[:, loc_id],
+            alpha=0.3,
+            color='blue',
+            label=f"{int(model.confidence_level * 100)}% CI",
+        )
+        plt.plot(t_range, model._y_matrix[:, loc_id], 'k.', markersize=3, label='Observed')
+        plt.plot(t_range, predictions.total[:, loc_id], 'b-', lw=1, label='Predicted')
+        plt.xlabel("Time")
+        plt.ylabel("NO₂ (µg/m³)")
+        plt.title(f"Predictions with Uncertainty (Location {loc_id})")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved uncertainty plot to {output_path}")
+    
+    plot_uncertainty_for_location(
+        hybrid['model'],
+        hybrid['predictions'],
+        paths['figures_dir'] / 'fig9_uncertainty_timeseries.png',
+        loc_id=0,
+    )
+    
+    # Figure 10: Spatial comparison maps (GAM-LUR vs GAM-SSM)
+    create_spatial_comparison_map(
+        baseline,
+        hybrid,
+        observations,
+        paths['figures_dir'] / 'fig10_spatial_comparison.png',
+    )
+    
+    # Figure 11: SHAP feature importance for GAM-LUR
+    create_shap_importance_plot(
+        baseline,
+        X_selected.values,
+        selected_features,
+        paths['figures_dir'] / 'fig11_shap_importance.png',
+    )
+    
+    # Figure 12: Residual hotspots (per-location RMSE)
+    create_residual_hotspot_map(
+        hybrid,
+        baseline,
+        time_idx,
+        loc_idx,
+        observations,
+        paths['figures_dir'] / 'fig12_residual_hotspots.png',
+    )
+    
+    # Figure 13: Moran's I of residual means (optional deps)
+    residual_means = (hybrid['model']._y_matrix - hybrid['predictions'].total).mean(axis=0)
+    lats = observations[['location_id', 'lat']].drop_duplicates().set_index('location_id').loc[
+        hybrid['model'].location_ids_, 'lat'
+    ].values
+    lons = observations[['location_id', 'lon']].drop_duplicates().set_index('location_id').loc[
+        hybrid['model'].location_ids_, 'lon'
+    ].values
+    create_morans_i_plot(
+        residual_means,
+        lats,
+        lons,
+        paths['figures_dir'] / 'fig13_morans_i.png',
+    )
+    
+    # Figure 14: Variogram of residual means (optional deps)
+    create_variogram_plot(
+        residual_means,
+        lats,
+        lons,
+        paths['figures_dir'] / 'fig14_variogram.png',
     )
     
     # Save model
