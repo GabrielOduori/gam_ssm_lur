@@ -7,6 +7,9 @@ __pycache__/
 *.so
 
 data/*
+outputs/*
+results/*
+figures/*
 
 RESPONSE_TO_REVIEWERS*
 REFACTORING_NOTES*
@@ -173,8 +176,9 @@ data/
 *.shx
 *.prj
 
-# Model outputs
+# Model outputs (but not src code!)
 models/
+!src/**/models/
 outputs/
 results/
 figures/

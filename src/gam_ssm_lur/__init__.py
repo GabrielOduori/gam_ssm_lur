@@ -17,11 +17,13 @@ __version__ = "0.1.0"
 __author__ = "Gabriel Oduori"
 __email__ = "gabriel.oduori@ucd.ie"
 
-from gam_ssm_lur.hybrid_model import HybridGAMSSM
-from gam_ssm_lur.spatial_gam import SpatialGAM
-from gam_ssm_lur.state_space import StateSpaceModel
-from gam_ssm_lur.kalman import KalmanFilter, RTSSmoother
-from gam_ssm_lur.em_estimator import EMEstimator
+# Core models
+from gam_ssm_lur.models import HybridGAMSSM, SpatialGAM, StateSpaceModel
+
+# Inference algorithms
+from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, EMEstimator
+
+# Utilities
 from gam_ssm_lur.features import FeatureSelector, FeatureExtractor
 from gam_ssm_lur.evaluation import ModelEvaluator
 from gam_ssm_lur.visualization import (
@@ -31,7 +33,8 @@ from gam_ssm_lur.visualization import (
     DiagnosticsVisualizer,
     create_publication_figure_set,
 )
-# New base classes and utilities
+
+# Base classes and utilities
 from gam_ssm_lur.base import BaseEstimator, ModelSummary
 from gam_ssm_lur import utils
 

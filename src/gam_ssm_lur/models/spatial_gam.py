@@ -31,8 +31,8 @@ try:
 except ImportError:
     HAS_PYGAM = False
 
-from .base import BaseEstimator, ModelSummary
-from .utils import (
+from gam_ssm_lur.base import BaseEstimator, ModelSummary
+from gam_ssm_lur.utils import (
     ensure_array,
     extract_feature_names,
     compute_r_squared,

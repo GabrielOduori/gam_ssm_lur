@@ -23,8 +23,8 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from gam_ssm_lur.kalman import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
-from gam_ssm_lur.em_estimator import EMEstimator, EMResult
+from gam_ssm_lur.inference.kalman import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
+from gam_ssm_lur.inference.em import EMEstimator, EMResult
 
 
 logger = logging.getLogger(__name__)

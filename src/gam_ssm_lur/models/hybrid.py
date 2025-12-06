@@ -32,8 +32,8 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from gam_ssm_lur.spatial_gam import SpatialGAM, GAMSummary
-from gam_ssm_lur.state_space import StateSpaceModel, SSMPrediction, SSMDiagnostics
+from gam_ssm_lur.models.spatial_gam import SpatialGAM, GAMSummary
+from gam_ssm_lur.models.state_space import StateSpaceModel, SSMPrediction, SSMDiagnostics
 
 
 logger = logging.getLogger(__name__)
