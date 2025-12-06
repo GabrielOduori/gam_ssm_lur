@@ -237,13 +237,15 @@ class HybridGAMSSM:
         # Store training data
         self._X_train = X
         self._y_train = y
-        
+        self._time_index_train = time_index.copy() if time_index is not None else None
+        self._location_index_train = location_index.copy() if location_index is not None else None
+
         # Reshape to matrix form (T, n_locations)
         if location_index is not None:
             if isinstance(location_index, pd.Series):
                 location_index = location_index.values
             location_index = np.asarray(location_index)
-            
+
             self._y_matrix, self.location_ids_, self.time_ids_ = self._reshape_to_matrix(
                 y, time_index, location_index
             )
@@ -361,28 +363,45 @@ class HybridGAMSSM:
         X: Optional[Union[NDArray, pd.DataFrame]] = None,
     ) -> HybridPrediction:
         """Generate predictions with uncertainty quantification.
-        
+
         Parameters
         ----------
         X : array-like, optional
             Spatial features for prediction. Uses training data if not provided.
-            
+
         Returns
         -------
         HybridPrediction
             Container with predictions and intervals
         """
         self._check_fitted()
-        
+
         if X is None:
-            X = self._X_train
+            # Build full grid from training data
+            if self._location_index_train is not None:
+                # Get unique locations and their features
+                unique_locs = np.unique(self._location_index_train)
+                loc_to_features = {}
+                for i, loc in enumerate(self._location_index_train):
+                    if loc not in loc_to_features:
+                        loc_to_features[loc] = self._X_train[i]
+
+                # Create full grid: all time×location combinations
+                X_grid = []
+                for _ in range(self.n_times_):
+                    for loc in self.location_ids_:
+                        X_grid.append(loc_to_features[loc])
+                X = np.array(X_grid)
+            else:
+                X = self._X_train
+
         if isinstance(X, pd.DataFrame):
             X = X.values
         X = np.asarray(X)
-        
+
         # Spatial predictions from GAM
         gam_pred, gam_std = self.gam_.predict(X, return_std=True)
-        
+
         # Reshape to matrix form
         spatial_matrix = gam_pred.reshape(self.n_times_, self.n_locations_)
         

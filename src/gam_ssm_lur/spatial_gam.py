@@ -31,6 +31,14 @@ try:
 except ImportError:
     HAS_PYGAM = False
 
+from .base import BaseEstimator, ModelSummary
+from .utils import (
+    ensure_array,
+    extract_feature_names,
+    compute_r_squared,
+    compute_aic,
+    compute_bic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +103,13 @@ class PartialDependence:
     confidence_upper: NDArray
 
 
-class SpatialGAM:
+class SpatialGAM(BaseEstimator):
     """Generalized Additive Model for spatial air pollution prediction.
-    
+
     Implements a GAM-based Land Use Regression model that captures non-linear
     relationships between pollutant concentrations and spatial covariates
     (land use, road network, traffic).
-    
+
     Parameters
     ----------
     n_splines : int
@@ -120,7 +128,7 @@ class SpatialGAM:
         Maximum iterations for fitting
     tol : float
         Convergence tolerance
-        
+
     Attributes
     ----------
     gam_ : GAM
@@ -129,7 +137,7 @@ class SpatialGAM:
         Names of features used in fitting
     is_fitted_ : bool
         Whether the model has been fitted
-        
+
     Examples
     --------
     >>> model = SpatialGAM(n_splines=10, lam='auto')
@@ -137,7 +145,7 @@ class SpatialGAM:
     >>> predictions = model.predict(X_new)
     >>> summary = model.summary()
     """
-    
+
     def __init__(
         self,
         n_splines: int = 10,
@@ -149,9 +157,11 @@ class SpatialGAM:
         max_iter: int = 100,
         tol: float = 1e-4,
     ):
+        super().__init__()
+
         if not HAS_PYGAM:
             raise ImportError("pygam is required for SpatialGAM. Install with: pip install pygam")
-            
+
         self.n_splines = n_splines
         self.spline_order = spline_order
         self.lam = lam
@@ -160,7 +170,7 @@ class SpatialGAM:
         self.fit_intercept = fit_intercept
         self.max_iter = max_iter
         self.tol = tol
-        
+
         # pygam requires n_splines > spline_order; bump if user passes too few
         if self.n_splines <= self.spline_order:
             logger.info(
@@ -170,10 +180,9 @@ class SpatialGAM:
                 self.spline_order + 1,
             )
             self.n_splines = self.spline_order + 1
-        
+
         self.gam_: Optional[GAM] = None
         self.feature_names_: Optional[List[str]] = None
-        self.is_fitted_ = False
         self._X_train: Optional[NDArray] = None
         self._y_train: Optional[NDArray] = None
         
@@ -213,19 +222,10 @@ class SpatialGAM:
         self : SpatialGAM
             Fitted model
         """
-        # Handle pandas inputs
-        if isinstance(X, pd.DataFrame):
-            self.feature_names_ = list(X.columns)
-            X = X.values
-        else:
-            self.feature_names_ = feature_names or [f"x{i}" for i in range(X.shape[1])]
-            X = np.asarray(X)
-            
-        if isinstance(y, pd.Series):
-            y = y.values
-        else:
-            y = np.asarray(y)
-            
+        # Handle pandas inputs using utility functions
+        X, self.feature_names_ = extract_feature_names(X, feature_names)
+        y = ensure_array(y)
+
         # Store training data for residual computation
         self._X_train = X
         self._y_train = y
@@ -431,11 +431,45 @@ class SpatialGAM:
         
         return df.sort_values('importance', ascending=False).reset_index(drop=True)
         
-    def _check_fitted(self) -> None:
-        """Check if model is fitted."""
-        if not self.is_fitted_:
-            raise RuntimeError("Model not fitted. Call fit() first.")
-            
+    def _get_state_dict(self) -> Dict:
+        """Get model state for serialization."""
+        import pickle
+        return {
+            'gam': self.gam_,
+            'feature_names': self.feature_names_,
+            'params': {
+                'n_splines': self.n_splines,
+                'spline_order': self.spline_order,
+                'lam': self.lam,
+                'link': self.link,
+                'distribution': self.distribution,
+                'fit_intercept': self.fit_intercept,
+                'max_iter': self.max_iter,
+                'tol': self.tol,
+            },
+            'training_data': {
+                'X': self._X_train,
+                'y': self._y_train,
+            }
+        }
+
+    def _set_state_dict(self, state: Dict) -> None:
+        """Set model state from deserialization."""
+        self.gam_ = state['gam']
+        self.feature_names_ = state['feature_names']
+        params = state['params']
+        self.n_splines = params['n_splines']
+        self.spline_order = params['spline_order']
+        self.lam = params['lam']
+        self.link = params['link']
+        self.distribution = params['distribution']
+        self.fit_intercept = params['fit_intercept']
+        self.max_iter = params['max_iter']
+        self.tol = params['tol']
+        if 'training_data' in state:
+            self._X_train = state['training_data']['X']
+            self._y_train = state['training_data']['y']
+
     def save(self, filepath: str) -> None:
         """Save fitted model to disk.
         

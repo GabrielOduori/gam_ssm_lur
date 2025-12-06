@@ -7,20 +7,19 @@ This script reproduces the main results from:
      Integrating Spatial and Temporal Dynamics"
     
 Usage:
-    python examples/reproduce_paper.py --data-dir data/ --output-dir results/
+    python experiments/reproduce_paper.py --data-dir data/ --output-dir results/
 
 Data Requirements:
     Download from Zenodo: https://zenodo.org/uploads/16534138
-    Expected files:
+    Expected file:
         - dublin_no2_2023.csv: Hourly NO₂ observations
-        - spatial_features.csv: Land use and road network features
-        - epa_stations.csv: Validation station locations
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -29,6 +28,12 @@ import numpy as np
 import pandas as pd
 
 from output_utils import make_experiment_dirs
+from mapping_utils import (
+    create_gridded_comparison,
+    create_gridded_residual_map,
+    create_uncertainty_surface,
+    create_temporal_gridded_sequence,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +58,165 @@ BASE_FEATURE_PREFIXES = [
     "trunk",
     "tertiary",
 ]
+
+
+def auto_detect_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Auto-detect likely column names from CSV.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe
+
+    Returns
+    -------
+    dict
+        Dictionary with detected column names
+    """
+    detected = {}
+    col_lower = {col: col.lower() for col in df.columns}
+    lower_to_orig = {v: k for k, v in col_lower.items()}
+
+    # Timestamp detection
+    datetime_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+    if datetime_cols:
+        detected['timestamp'] = datetime_cols[0]
+    else:
+        # Look for common names
+        for candidate in ['timestamp', 'date', 'time', 'datetime', 'dt']:
+            if candidate in lower_to_orig:
+                detected['timestamp'] = lower_to_orig[candidate]
+                break
+
+    # Target detection (NO2 related)
+    for col in df.columns:
+        col_l = col.lower()
+        if 'epa' in col_l and 'no2' in col_l:
+            detected['target'] = col
+            break
+        elif 'no2' in col_l or 'no_2' in col_l:
+            if 'target' not in detected:  # Prefer EPA columns
+                detected['target'] = col
+
+    # Fallback target (satellite NO2)
+    for col in df.columns:
+        col_l = col.lower()
+        if 'no2' in col_l and 'value' in col_l:
+            detected['fallback_target'] = col
+            break
+
+    # Location detection
+    for candidate in ['grid_id', 'location_id', 'location', 'site_id', 'station_id']:
+        if candidate in lower_to_orig:
+            detected['location'] = lower_to_orig[candidate]
+            break
+
+    # Coordinate detection
+    for candidate in ['latitude', 'lat']:
+        if candidate in lower_to_orig:
+            detected['lat'] = lower_to_orig[candidate]
+            break
+
+    for candidate in ['longitude', 'lon', 'long', 'lng']:
+        if candidate in lower_to_orig:
+            detected['lon'] = lower_to_orig[candidate]
+            break
+
+    return detected
+
+
+def validate_and_confirm_columns(
+    data_file: Path,
+    provided_args: dict[str, str | None],
+    interactive: bool = True,
+) -> dict[str, str]:
+    """Load CSV preview and confirm column mappings.
+
+    Parameters
+    ----------
+    data_file : Path
+        Path to data file
+    provided_args : dict
+        User-provided column arguments
+    interactive : bool
+        Whether to prompt user for confirmation
+
+    Returns
+    -------
+    dict
+        Confirmed column mappings
+    """
+    logger.info(f"Loading preview from {data_file.name}...")
+
+    try:
+        # Load preview
+        df_preview = pd.read_csv(data_file, nrows=5)
+    except Exception as e:
+        logger.error(f" Failed to load data file: {data_file}")
+        logger.error(f"   Error: {e}")
+        logger.info(f"\n Troubleshooting:")
+        logger.info(f"   1. Check file exists: ls {data_file}")
+        logger.info(f"   2. Check CSV format: head {data_file}")
+        sys.exit(1)
+
+    print(f"\n Data Preview from {data_file.name}")
+    print(f"   Shape: {df_preview.shape[0]} rows (preview), {df_preview.shape[1]} columns")
+    print(f"   Columns: {', '.join(df_preview.columns[:10].tolist())}")
+    if len(df_preview.columns) > 10:
+        print(f"            ... and {len(df_preview.columns) - 10} more")
+    print()
+
+    # Auto-detect columns
+    detected = auto_detect_columns(df_preview)
+
+    # Merge with user-provided args (user args take precedence)
+    final_mapping = {}
+    field_map = {
+        'timestamp': 'timestamp_col',
+        'target': 'target_col',
+        'fallback_target': 'fallback_target_col',
+        'location': 'location_col',
+        'lat': 'lat_col',
+        'lon': 'lon_col',
+    }
+
+    for key, arg_name in field_map.items():
+        # User-provided takes precedence
+        if provided_args.get(arg_name):
+            final_mapping[arg_name] = provided_args[arg_name]
+        elif key in detected:
+            final_mapping[arg_name] = detected[key]
+
+    # Display auto-detected or user-provided columns
+    print("🔍 Column Mapping:")
+    print(f"   Timestamp column:       {final_mapping.get('timestamp_col', '❌ NOT FOUND')}")
+    print(f"   Target column:          {final_mapping.get('target_col', '❌ NOT FOUND')}")
+    print(f"   Fallback target column: {final_mapping.get('fallback_target_col', '(optional)')}")
+    print(f"   Location column:        {final_mapping.get('location_col', '❌ NOT FOUND')}")
+    print(f"   Latitude column:        {final_mapping.get('lat_col', '❌ NOT FOUND')}")
+    print(f"   Longitude column:       {final_mapping.get('lon_col', '❌ NOT FOUND')}")
+
+    # Check for missing required columns
+    required = ['timestamp_col', 'target_col', 'location_col', 'lat_col', 'lon_col']
+    missing = [f for f in required if f not in final_mapping]
+
+    if missing:
+        print(f"\n ERROR: Could not detect the following required columns:")
+        for m in missing:
+            print(f"   - {m.replace('_col', '')}")
+        print(f"\n Please specify them manually using command-line arguments:")
+        print(f"   --{missing[0].replace('_', '-')} <column_name>")
+        sys.exit(1)
+
+    if interactive:
+        print()
+        response = input("✓ Use these columns? [Y/n]: ").strip().lower()
+        if response not in ['', 'y', 'yes']:
+            print("\n Aborted. Please specify columns manually using --timestamp-col, --target-col, etc.")
+            sys.exit(0)
+        print()
+
+    return final_mapping
 
 
 def setup_paths(data_dir: Path, output_base: Path, run_name: str | None) -> dict:
@@ -148,9 +312,15 @@ def load_data(
     location_col: str,
     lat_col: str,
     lon_col: str,
+    max_records: int | None = None,
 ) -> tuple:
     """Load Dublin NO₂ dataset, supporting both merged and separate inputs.
-    
+
+    Parameters
+    ----------
+    max_records : int, optional
+        Maximum number of records to load (for testing). If None, loads all data.
+
     Returns
     -------
     observations : pd.DataFrame
@@ -161,15 +331,20 @@ def load_data(
         EPA validation station information (None if not provided)
     """
     logger.info("Loading data...")
-    
+
     # Path 1: user-provided merged table
     if data_file:
         if not data_file.exists():
             raise FileNotFoundError(f"Merged data file not found: {data_file}")
-        
+
         logger.info(f"Using merged data file: {data_file}")
-        
-        df = pd.read_csv(data_file, parse_dates=[timestamp_col])
+
+        # Load with optional row limit
+        if max_records:
+            logger.info(f"Loading only first {max_records} records for testing")
+            df = pd.read_csv(data_file, parse_dates=[timestamp_col], nrows=max_records)
+        else:
+            df = pd.read_csv(data_file, parse_dates=[timestamp_col])
         df, feature_cols = _clean_merged_dataframe(
             df=df,
             timestamp_col=timestamp_col,
@@ -182,6 +357,7 @@ def load_data(
         )
         
         # Normalize column names for downstream code
+        # df = df.head(100)
         df = df.rename(columns={
             timestamp_col: "timestamp",
             target_col: "no2",
@@ -245,7 +421,7 @@ def generate_demo_data() -> tuple:
         ['motorway_distance', 'primary_distance', 'industrial_distance'] +
         ['traffic_volume', 'traffic_distance'] +
         ['tropomi_no2'] +
-        [f'extra_feat_{i}' for i in range(n_features - 43)]
+        [f'synthetic_noise_{i}' for i in range(n_features - 43)]
     )
     
     features = pd.DataFrame(
@@ -613,13 +789,19 @@ def create_residual_hotspot_map(
     model = hybrid_result['model']
     y_matrix = model._y_matrix
     n_times, n_locs = y_matrix.shape
-    
+
+    # Create mappings from original indices to matrix positions
+    time_map = {t: i for i, t in enumerate(model.time_ids_)}
+    loc_map = {l: i for i, l in enumerate(model.location_ids_)}
+
     def _reshape(values: np.ndarray) -> np.ndarray:
         mat = np.full((n_times, n_locs), np.nan)
         for v, t, l in zip(values, time_idx, loc_idx):
-            mat[t, l] = v
+            t_pos = time_map[t]
+            l_pos = loc_map[l]
+            mat[t_pos, l_pos] = v
         return mat
-    
+
     baseline_matrix = _reshape(baseline['predictions'])
     hybrid_matrix = hybrid_result['predictions'].total
     
@@ -660,28 +842,25 @@ def create_residual_hotspot_map(
 def create_shap_importance_plot(
     baseline: dict,
     X: np.ndarray,
+    y: np.ndarray,
     feature_names: list[str],
     output_path: Path,
     max_samples: int = 800,
 ) -> None:
-    """Create SHAP summary plot for the baseline GAM-LUR model."""
-    try:
-        import shap
-    except ImportError:
-        logger.warning("shap not installed; skipping SHAP plot")
-        return
-    
-    X_sample = X
-    if len(X) > max_samples:
-        idx = np.random.choice(len(X), size=max_samples, replace=False)
-        X_sample = X[idx]
-    
+    """Create SHAP summary plot for the baseline GAM-LUR model. Falls back to permutation importance."""
     model = baseline['model']
-    
-    def predict_fn(x):
-        return model.predict(x)
-    
+    tried_shap = False
     try:
+        import shap  # type: ignore
+        tried_shap = True
+        X_sample = X
+        if len(X) > max_samples:
+            idx = np.random.choice(len(X), size=max_samples, replace=False)
+            X_sample = X[idx]
+        
+        def predict_fn(x):
+            return model.predict(x)
+        
         explainer = shap.KernelExplainer(predict_fn, shap.sample(X_sample, min(200, len(X_sample))))
         shap_values = explainer.shap_values(X_sample, nsamples=100)
         shap.summary_plot(shap_values, X_sample, feature_names=feature_names, show=False)
@@ -691,8 +870,38 @@ def create_shap_importance_plot(
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         logger.info(f"Saved SHAP summary plot to {output_path}")
+        return
     except Exception as e:
-        logger.warning(f"SHAP plot skipped due to error: {e}")
+        if tried_shap:
+            logger.warning(f"SHAP plot failed ({e}); falling back to permutation importance")
+        else:
+            logger.warning("shap not installed; falling back to permutation importance")
+    
+    # Fallback: permutation importance on RMSE
+    import matplotlib.pyplot as plt
+    baseline_pred = baseline['predictions']
+    baseline_rmse = np.sqrt(np.mean((y - baseline_pred) ** 2))
+    rng = np.random.default_rng(42)
+    deltas = []
+    for j in range(X.shape[1]):
+        X_perm = X.copy()
+        rng.shuffle(X_perm[:, j])
+        perm_pred = model.predict(X_perm)
+        perm_rmse = np.sqrt(np.mean((y - perm_pred) ** 2))
+        deltas.append(perm_rmse - baseline_rmse)
+    deltas = np.array(deltas)
+    
+    sorted_idx = np.argsort(deltas)[::-1]
+    plt.figure(figsize=(8, max(4, 0.3 * len(feature_names))))
+    plt.barh(np.array(feature_names)[sorted_idx], deltas[sorted_idx], color='slateblue')
+    plt.xlabel("RMSE increase when permuted (µg/m³)")
+    plt.title("Feature importance (permutation fallback)")
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Saved permutation importance plot to {output_path}")
 
 
 def create_morans_i_plot(residuals: np.ndarray, lats: np.ndarray, lons: np.ndarray, output_path: Path) -> None:
@@ -729,9 +938,22 @@ def create_variogram_plot(residuals: np.ndarray, lats: np.ndarray, lons: np.ndar
     except ImportError:
         logger.warning("skgstat not installed; skipping variogram plot")
         return
-    
-    coords = np.column_stack([lons, lats])
-    V = Variogram(coords, residuals, normalize=True, n_lags=12, maxlag='median')
+
+    # Check if we have enough locations for variogram analysis
+    if len(residuals) < 10:
+        logger.warning(f"Only {len(residuals)} locations available; skipping variogram plot (need at least 10)")
+        return
+
+    # Remove NaN values
+    valid_mask = ~np.isnan(residuals)
+    if valid_mask.sum() < 10:
+        logger.warning(f"Only {valid_mask.sum()} valid residuals; skipping variogram plot (need at least 10)")
+        return
+
+    coords = np.column_stack([lons[valid_mask], lats[valid_mask]])
+    residuals_clean = residuals[valid_mask]
+
+    V = Variogram(coords, residuals_clean, normalize=True, n_lags=12, maxlag='median')
     fig = V.plot(show=False)
     fig.set_figwidth(6)
     fig.set_figheight(4)
@@ -744,16 +966,32 @@ def create_variogram_plot(residuals: np.ndarray, lats: np.ndarray, lons: np.ndar
 
 def create_observed_vs_predicted_plot(baseline: dict, hybrid_result: dict, output_path: Path):
     """Create Figure 7: Observed vs predicted comparison."""
-    
+
     model = hybrid_result['model']
     predictions = hybrid_result['predictions']
-    
-    y_true = model._y_matrix.flatten()
-    y_pred_hybrid = predictions.total.flatten()
+
+    # Use the original training data for fair comparison
+    y_true = model._y_train
     y_pred_baseline = baseline['predictions']
-    
+
+    # For hybrid, we need to extract predictions at observed locations only
+    # Create mapping from (time, location) to prediction
+    y_pred_hybrid_full = predictions.total.flatten()
+
+    # Build index mapping for observed data points
+    time_map = {t: i for i, t in enumerate(model.time_ids_)}
+    loc_map = {l: i for i, l in enumerate(model.location_ids_)}
+
+    y_pred_hybrid = []
+    for t_idx, l_idx in zip(model._time_index_train, model._location_index_train):
+        t_pos = time_map[t_idx]
+        l_pos = loc_map[l_idx]
+        flat_idx = t_pos * model.n_locations_ + l_pos
+        y_pred_hybrid.append(y_pred_hybrid_full[flat_idx])
+    y_pred_hybrid = np.array(y_pred_hybrid)
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    
+
     # Baseline
     ax = axes[0]
     ax.scatter(y_true, y_pred_baseline, alpha=0.1, s=1)
@@ -781,32 +1019,86 @@ def create_observed_vs_predicted_plot(baseline: dict, hybrid_result: dict, outpu
 
 def main():
     """Reproduce paper results."""
-    
-    parser = argparse.ArgumentParser(description='Reproduce GAM-SSM-LUR paper results')
-    parser.add_argument('--data-dir', type=Path, default=Path('data'),
-                        help='Directory containing input data')
-    parser.add_argument('--data-file', type=Path, default=None,
-                        help='Path to merged CSV containing timestamp, target, location, coords, and all spatial features')
-    parser.add_argument('--timestamp-col', type=str, default='timestamp',
-                        help='Timestamp column in merged data')
-    parser.add_argument('--target-col', type=str, default='epa_no2',
-                        help='Target column (e.g., gold-standard EPA NO₂) in merged data')
-    parser.add_argument('--location-col', type=str, default='grid_id',
-                        help='Location ID column in merged data')
-    parser.add_argument('--lat-col', type=str, default='latitude',
-                        help='Latitude column in merged data')
-    parser.add_argument('--lon-col', type=str, default='longitude',
-                        help='Longitude column in merged data')
-    parser.add_argument('--fallback-target-col', type=str, default='no2_values',
-                        help='Optional column to fill missing target values (e.g., satellite NO₂)')
+
+    parser = argparse.ArgumentParser(
+        description='Reproduce GAM-SSM-LUR paper results',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with auto-detected columns (interactive)
+  python experiments/reproduce_paper.py --data-file data/my_data.csv
+
+  # Quick test with first 100 records
+  python experiments/reproduce_paper.py --data-file data/my_data.csv --max-records 100 --yes
+
+  # Run with specific columns (non-interactive)
+  python experiments/reproduce_paper.py --data-file data/my_data.csv \\
+    --timestamp-col timestamp --target-col epa_no2 --location-col grid_id \\
+    --lat-col latitude --lon-col longitude --yes
+
+  # Run with demo data (no file needed)
+  python experiments/reproduce_paper.py
+        """
+    )
+    parser.add_argument('--data-file', type=Path, required=False,
+                        help='Path to merged CSV file (if not provided, uses demo data)')
+    parser.add_argument('--timestamp-col', type=str, default=None,
+                        help='Timestamp column in merged data (auto-detected if not provided)')
+    parser.add_argument('--target-col', type=str, default=None,
+                        help='Target column (e.g., gold-standard EPA NO₂) in merged data (auto-detected if not provided)')
+    parser.add_argument('--location-col', type=str, default=None,
+                        help='Location ID column in merged data (auto-detected if not provided)')
+    parser.add_argument('--lat-col', type=str, default=None,
+                        help='Latitude column in merged data (auto-detected if not provided)')
+    parser.add_argument('--lon-col', type=str, default=None,
+                        help='Longitude column in merged data (auto-detected if not provided)')
+    parser.add_argument('--fallback-target-col', type=str, default=None,
+                        help='Optional column to fill missing target values (e.g., satellite NO₂) (auto-detected if not provided)')
     parser.add_argument('--output-dir', type=Path, default=Path('results'),
                         help='Base directory for output files (each run gets a timestamped subfolder)')
     parser.add_argument('--run-name', type=str, default=None,
                         help='Optional custom experiment folder name (defaults to experiment_<timestamp>)')
+    parser.add_argument('--yes', '-y', action='store_true',
+                        help='Skip interactive confirmation (use auto-detected or provided columns)')
+    parser.add_argument('--max-records', type=int, default=None,
+                        help='Maximum number of records to load for testing (default: load all data)')
     args = parser.parse_args()
-    
+
+    # Determine column mappings
+    if args.data_file and args.data_file.exists():
+        # Validate and get column mappings
+        provided_args = {
+            'timestamp_col': args.timestamp_col,
+            'target_col': args.target_col,
+            'location_col': args.location_col,
+            'lat_col': args.lat_col,
+            'lon_col': args.lon_col,
+            'fallback_target_col': args.fallback_target_col,
+        }
+        column_mapping = validate_and_confirm_columns(
+            args.data_file,
+            provided_args,
+            interactive=not args.yes,
+        )
+        # Update args with validated columns
+        args.timestamp_col = column_mapping['timestamp_col']
+        args.target_col = column_mapping['target_col']
+        args.location_col = column_mapping['location_col']
+        args.lat_col = column_mapping['lat_col']
+        args.lon_col = column_mapping['lon_col']
+        args.fallback_target_col = column_mapping.get('fallback_target_col')
+        data_dir = args.data_file.parent
+    elif args.data_file:
+        logger.warning(f"Data file not found: {args.data_file}")
+        logger.info("Falling back to demo data generation...")
+        args.data_file = None
+        data_dir = Path('.')
+    else:
+        logger.info("No data file provided. Using demo data...")
+        data_dir = Path('.')
+
     # Setup
-    paths = setup_paths(args.data_dir, args.output_dir, args.run_name)
+    paths = setup_paths(data_dir, args.output_dir, args.run_name)
     
     logger.info("=" * 70)
     logger.info("GAM-SSM-LUR Paper Reproduction")
@@ -818,7 +1110,7 @@ def main():
     
     # Load data
     observations, features, validation_stations = load_data(
-        data_dir=args.data_dir,
+        data_dir=data_dir,
         data_file=args.data_file,
         timestamp_col=args.timestamp_col,
         target_col=args.target_col,
@@ -826,6 +1118,7 @@ def main():
         location_col=args.location_col,
         lat_col=args.lat_col,
         lon_col=args.lon_col,
+        max_records=args.max_records,
     )
     
     # Prepare arrays
@@ -837,7 +1130,9 @@ def main():
     feature_cols = [c for c in features.columns if c != 'location_id']
     X = df[feature_cols].values
     y = df['no2'].values
-    time_idx = df['timestamp'].factorize()[0]  # Convert to integer indices
+    time_codes, time_uniques = pd.factorize(df['timestamp'])
+    time_idx = time_codes  # integer indices for reshaping
+    time_labels = pd.Index(time_uniques)
     loc_idx = df['location_id'].values
     
     logger.info(f"Data shape: X={X.shape}, y={y.shape}")
@@ -920,21 +1215,31 @@ def main():
     )
     
     # Figure 9: Prediction intervals for one location (uncertainty)
-    def plot_uncertainty_for_location(model, predictions, output_path: Path, loc_id: int = 0):
+    def plot_uncertainty_for_location(model, predictions, output_path: Path, loc_id: int = 0, time_labels=None):
         """Plot observed/predicted with uncertainty bands for a single location."""
         t_range = np.arange(model.n_times_)
+        x_vals = t_range
+        x_label = "Time step"
+        if time_labels is not None and len(time_labels) == model.n_times_:
+            x_vals = time_labels
+            # Try formatting as dates if possible
+            try:
+                x_vals = pd.to_datetime(x_vals)
+                x_label = "Date"
+            except Exception:
+                x_label = "Time"
         plt.figure(figsize=(8, 4))
         plt.fill_between(
-            t_range,
+            x_vals,
             predictions.lower[:, loc_id],
             predictions.upper[:, loc_id],
             alpha=0.3,
             color='blue',
             label=f"{int(model.confidence_level * 100)}% CI",
         )
-        plt.plot(t_range, model._y_matrix[:, loc_id], 'k.', markersize=3, label='Observed')
-        plt.plot(t_range, predictions.total[:, loc_id], 'b-', lw=1, label='Predicted')
-        plt.xlabel("Time")
+        plt.plot(x_vals, model._y_matrix[:, loc_id], 'k.', markersize=3, label='Observed')
+        plt.plot(x_vals, predictions.total[:, loc_id], 'b-', lw=1, label='Predicted')
+        plt.xlabel(x_label)
         plt.ylabel("NO₂ (µg/m³)")
         plt.title(f"Predictions with Uncertainty (Location {loc_id})")
         plt.legend()
@@ -948,6 +1253,7 @@ def main():
         hybrid['predictions'],
         paths['figures_dir'] / 'fig9_uncertainty_timeseries.png',
         loc_id=0,
+        time_labels=time_labels,
     )
     
     # Figure 10: Spatial comparison maps (GAM-LUR vs GAM-SSM)
@@ -962,6 +1268,7 @@ def main():
     create_shap_importance_plot(
         baseline,
         X_selected.values,
+        y,
         selected_features,
         paths['figures_dir'] / 'fig11_shap_importance.png',
     )
@@ -998,7 +1305,81 @@ def main():
         lons,
         paths['figures_dir'] / 'fig14_variogram.png',
     )
-    
+
+    # =========================================================================
+    # GRIDDED/INTERPOLATED SURFACE MAPS (new publication-quality figures)
+    # =========================================================================
+    logger.info("Creating gridded interpolated surface maps...")
+
+    # Prepare data for gridded maps
+    # Get coordinates for each location
+    loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates()
+    loc_meta = loc_meta.set_index('location_id').loc[hybrid['model'].location_ids_]
+    coordinates = loc_meta[['lon', 'lat']].values
+
+    # Figure 15: Gridded three-panel comparison (time-averaged)
+    # Average over time for spatial comparison
+    y_obs_mean = hybrid['model']._y_matrix.mean(axis=0)
+    baseline_pred_matrix = np.full_like(hybrid['model']._y_matrix, np.nan)
+
+    # Rebuild baseline predictions in matrix form
+    time_map = {t: i for i, t in enumerate(hybrid['model'].time_ids_)}
+    loc_map = {l: i for i, l in enumerate(hybrid['model'].location_ids_)}
+    for v, t, l in zip(baseline['predictions'], hybrid['model']._time_index_train, hybrid['model']._location_index_train):
+        t_pos = time_map[t]
+        l_pos = loc_map[l]
+        baseline_pred_matrix[t_pos, l_pos] = v
+
+    baseline_mean = np.nanmean(baseline_pred_matrix, axis=0)
+    hybrid_mean = hybrid['predictions'].total.mean(axis=0)
+
+    create_gridded_comparison(
+        coordinates=coordinates,
+        observed=y_obs_mean,
+        baseline_pred=baseline_mean,
+        hybrid_pred=hybrid_mean,
+        output_path=paths['figures_dir'] / 'fig15_gridded_comparison.png',
+        title_suffix=' (Time-Averaged)',
+    )
+    logger.info(f"Saved gridded comparison to {paths['figures_dir'] / 'fig15_gridded_comparison.png'}")
+
+    # Figure 16: Gridded residual maps with performance metrics
+    create_gridded_residual_map(
+        coordinates=coordinates,
+        observed=y_obs_mean,
+        baseline_pred=baseline_mean,
+        hybrid_pred=hybrid_mean,
+        output_path=paths['figures_dir'] / 'fig16_gridded_residuals.png',
+    )
+    logger.info(f"Saved gridded residuals to {paths['figures_dir'] / 'fig16_gridded_residuals.png'}")
+
+    # Figure 17: Uncertainty surface map
+    # Get prediction uncertainty (averaged over time)
+    uncertainty_matrix = (hybrid['predictions'].upper - hybrid['predictions'].lower) / (2 * 1.96)  # Convert to SD
+    mean_uncertainty = uncertainty_matrix.mean(axis=0)
+
+    create_uncertainty_surface(
+        coordinates=coordinates,
+        predictions=hybrid_mean,
+        std_dev=mean_uncertainty,
+        output_path=paths['figures_dir'] / 'fig17_uncertainty_surface.png',
+    )
+    logger.info(f"Saved uncertainty surface to {paths['figures_dir'] / 'fig17_uncertainty_surface.png'}")
+
+    # Figure 18: Temporal sequence of gridded maps
+    # Select 5 time points across the dataset
+    n_times = hybrid['model'].n_times_
+    time_points = [0, n_times//4, n_times//2, 3*n_times//4, n_times-1]
+
+    create_temporal_gridded_sequence(
+        coordinates=coordinates,
+        observed_matrix=hybrid['model']._y_matrix,
+        predicted_matrix=hybrid['predictions'].total,
+        time_points=time_points,
+        output_path=paths['figures_dir'] / 'fig18_temporal_sequence.png',
+    )
+    logger.info(f"Saved temporal sequence to {paths['figures_dir'] / 'fig18_temporal_sequence.png'}")
+
     # Save model
     hybrid['model'].save(paths['models_dir'] / 'hybrid_gam_ssm')
     

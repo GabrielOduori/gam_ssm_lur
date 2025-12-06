@@ -14,7 +14,7 @@ Generates publication-ready figures showing:
 - Residual analysis
 
 Run with:
-    python examples/03_model_comparison.py
+    python experiments/03_model_comparison.py
 """
 
 import logging

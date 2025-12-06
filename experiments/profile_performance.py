@@ -3,7 +3,7 @@ Lightweight profiling script to surface bottlenecks in the hybrid pipeline.
 
 Usage
 -----
-PYTHONPATH=src python examples/profile_performance.py \
+PYTHONPATH=src python experiments/profile_performance.py \
     --n-locs 40 --n-times 80 --n-features 8 --mode dense
 
 Flags let you scale the workload; defaults keep runs short. Set

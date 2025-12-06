@@ -152,7 +152,7 @@ The framework automatically selects computational strategy based on problem size
 
 ## Examples
 
-See the `examples/` directory for detailed tutorials:
+See the `experiments/` directory for detailed tutorials:
 
 - `01_basic_usage.py`: Simple end-to-end workflow
 - `02_feature_engineering.py`: OSM and traffic data extraction
@@ -165,13 +165,43 @@ See the `examples/` directory for detailed tutorials:
 To reproduce the results from the paper:
 
 ```bash
-# Download data from Zenodo
-wget https://zenodo.org/uploads/16534138/dublin_no2_2023.zip
-unzip dublin_no2_2023.zip -d data/
+# Option 1: Run with demo data (no file needed)
+python experiments/reproduce_paper.py
 
-# Run the full analysis pipeline
-python examples/reproduce_paper.py --data-dir data/ --output-dir results/
+# Option 2: Run with your own data (auto-detects columns interactively)
+python experiments/reproduce_paper.py --data-file /path/to/your_data.csv
+
+# Option 3: Quick test with limited records (faster for testing)
+python experiments/reproduce_paper.py \
+  --data-file /path/to/your_data.csv \
+  --max-records 100 \
+  --yes
+
+# Option 4: Run with specific column names (non-interactive)
+python experiments/reproduce_paper.py \
+  --data-file /path/to/your_data.csv \
+  --timestamp-col timestamp \
+  --target-col epa_no2 \
+  --location-col grid_id \
+  --lat-col latitude \
+  --lon-col longitude \
+  --yes
+
+# Option 5: Customize output location
+python experiments/reproduce_paper.py \
+  --data-file /path/to/your_data.csv \
+  --output-dir my_results \
+  --run-name experiment_2024
 ```
+
+**Your CSV file should contain:**
+- A timestamp column (e.g., `timestamp`, `date`, `datetime`)
+- A target NO₂ column (e.g., `epa_no2`, `no2`)
+- A location identifier (e.g., `grid_id`, `location_id`, `station_id`)
+- Latitude and longitude columns (e.g., `latitude`, `longitude`)
+- Spatial feature columns (e.g., `traffic_volume`, `motorway_50m`, etc.)
+
+The script will auto-detect these columns and ask for confirmation before running.
 
 ## Citation
 

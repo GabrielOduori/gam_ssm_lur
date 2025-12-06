@@ -31,6 +31,9 @@ from gam_ssm_lur.visualization import (
     DiagnosticsVisualizer,
     create_publication_figure_set,
 )
+# New base classes and utilities
+from gam_ssm_lur.base import BaseEstimator, ModelSummary
+from gam_ssm_lur import utils
 
 __all__ = [
     # Main model
@@ -41,7 +44,11 @@ __all__ = [
     "KalmanFilter",
     "RTSSmoother",
     "EMEstimator",
+    # Base classes
+    "BaseEstimator",
+    "ModelSummary",
     # Utilities
+    "utils",
     "FeatureSelector",
     "FeatureExtractor",
     "ModelEvaluator",

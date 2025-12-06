@@ -8,7 +8,7 @@ This script demonstrates the core workflow:
 3. Evaluate performance and visualize results
 
 Run with:
-    python examples/01_basic_usage.py
+    python experiments/01_basic_usage.py
 """
 
 import logging

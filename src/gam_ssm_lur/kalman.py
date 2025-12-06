@@ -285,6 +285,13 @@ class KalmanFilter:
             elif B.ndim == 1:
                 return A * B
             return A @ B
+        # Sparse/block modes need vector reshaping to avoid (n,k),(k,)-> errors
+        if sparse.issparse(A) and B.ndim == 1:
+            result = A @ B.reshape(-1, 1)
+            return np.asarray(result).ravel()
+        if sparse.issparse(A) and B.ndim == 2 and B.shape[0] == 1 and B.shape[1] == A.shape[1]:
+            result = A @ B.T
+            return np.asarray(result).ravel()
         return A @ B
         
     def _solve(self, A: NDArray, b: NDArray) -> NDArray:
@@ -496,6 +503,10 @@ class KalmanFilter:
         if self.mode == "diagonal":
             filtered_covs = np.zeros((T_len, self.state_dim))
             predicted_covs = np.zeros((T_len, self.state_dim))
+        elif self.mode == "block":
+            # Store sparse blocks as objects to avoid casting errors
+            filtered_covs = np.empty((T_len,), dtype=object)
+            predicted_covs = np.empty((T_len,), dtype=object)
         else:
             filtered_covs = np.zeros((T_len, self.state_dim, self.state_dim))
             predicted_covs = np.zeros((T_len, self.state_dim, self.state_dim))

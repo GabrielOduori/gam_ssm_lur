@@ -9,6 +9,9 @@ Creates publication-ready interpolated raster maps showing:
 - Uncertainty surfaces
 
 These are the standard presentation format for LUR studies.
+
+NOTE: This script now uses the unified visualization module (mapping_utils.py)
+to avoid code duplication across examples.
 """
 
 from pathlib import Path
@@ -19,10 +22,17 @@ import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Rectangle
-from scipy.interpolate import RBFInterpolator, griddata
-from scipy.ndimage import gaussian_filter
 
 from output_utils import make_experiment_dirs
+from mapping_utils import (
+    create_interpolation_grid,
+    interpolate_to_grid,
+    plot_gridded_surface,
+    create_gridded_comparison,
+    create_gridded_residual_map,
+    create_uncertainty_surface,
+    create_temporal_gridded_sequence,
+)
 
 # Set publication-quality defaults
 plt.rcParams.update({
@@ -142,136 +152,8 @@ def generate_realistic_data(n_locations=300, n_days=50, seed=42):
     }
 
 
-def create_interpolation_grid():
-    """Create the interpolation grid for Dublin."""
-    lon_grid = np.linspace(DUBLIN_BOUNDS['lon_min'], DUBLIN_BOUNDS['lon_max'], GRID_RESOLUTION)
-    lat_grid = np.linspace(DUBLIN_BOUNDS['lat_min'], DUBLIN_BOUNDS['lat_max'], GRID_RESOLUTION)
-    Lon, Lat = np.meshgrid(lon_grid, lat_grid)
-    return Lon, Lat, lon_grid, lat_grid
-
-
-def interpolate_to_grid(coordinates, values, Lon, Lat, method='cubic', smooth=True):
-    """Interpolate point data to regular grid.
-    
-    Parameters
-    ----------
-    coordinates : array (n, 2)
-        Point coordinates (lon, lat)
-    values : array (n,)
-        Values at points
-    Lon, Lat : array (grid_size, grid_size)
-        Meshgrid of target coordinates
-    method : str
-        Interpolation method ('linear', 'cubic', 'rbf')
-    smooth : bool
-        Apply Gaussian smoothing
-        
-    Returns
-    -------
-    grid : array (grid_size, grid_size)
-        Interpolated values on grid
-    """
-    if method == 'rbf':
-        # Radial basis function interpolation (smoother)
-        rbf = RBFInterpolator(coordinates, values, kernel='thin_plate_spline', smoothing=0.1)
-        grid_points = np.column_stack([Lon.ravel(), Lat.ravel()])
-        grid = rbf(grid_points).reshape(Lon.shape)
-    else:
-        # scipy griddata
-        grid = griddata(coordinates, values, (Lon, Lat), method=method)
-        
-        # Fill NaN values with nearest neighbor
-        if np.any(np.isnan(grid)):
-            grid_nearest = griddata(coordinates, values, (Lon, Lat), method='nearest')
-            grid = np.where(np.isnan(grid), grid_nearest, grid)
-    
-    if smooth:
-        grid = gaussian_filter(grid, sigma=1.5)
-        
-    return grid
-
-
-def create_dublin_mask(Lon, Lat):
-    """Create a simple mask for Dublin area (rough polygon)."""
-    # Simple rectangular mask with rounded corners effect
-    mask = np.ones_like(Lon, dtype=bool)
-    
-    # Create distance from center for fading edges
-    center_lon = (DUBLIN_BOUNDS['lon_min'] + DUBLIN_BOUNDS['lon_max']) / 2
-    center_lat = (DUBLIN_BOUNDS['lat_min'] + DUBLIN_BOUNDS['lat_max']) / 2
-    
-    return mask
-
-
-def plot_gridded_surface(
-    grid, Lon, Lat, 
-    ax=None, 
-    title=None,
-    cmap='viridis',
-    vmin=None, vmax=None,
-    colorbar=True,
-    colorbar_label='NO₂ (µg/m³)',
-    show_coords=True,
-    contours=False,
-    n_contours=10,
-):
-    """Plot a single gridded surface map.
-    
-    Parameters
-    ----------
-    grid : array (grid_size, grid_size)
-        Gridded values
-    Lon, Lat : array
-        Coordinate meshgrids
-    ax : matplotlib axes
-        Axes to plot on
-    title : str
-        Plot title
-    cmap : str
-        Colormap
-    vmin, vmax : float
-        Color limits
-    colorbar : bool
-        Show colorbar
-    colorbar_label : str
-        Colorbar label
-    show_coords : bool
-        Show coordinate labels
-    contours : bool
-        Overlay contour lines
-    n_contours : int
-        Number of contour levels
-    """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        
-    # Plot surface
-    im = ax.pcolormesh(Lon, Lat, grid, cmap=cmap, shading='auto',
-                       vmin=vmin, vmax=vmax, rasterized=True)
-    
-    # Add contours
-    if contours:
-        levels = np.linspace(vmin or grid.min(), vmax or grid.max(), n_contours)
-        cs = ax.contour(Lon, Lat, grid, levels=levels, colors='white', 
-                       linewidths=0.5, alpha=0.5)
-        ax.clabel(cs, inline=True, fontsize=7, fmt='%.0f')
-    
-    # Colorbar
-    if colorbar:
-        cbar = plt.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
-        cbar.set_label(colorbar_label, fontsize=10)
-        
-    # Labels
-    if show_coords:
-        ax.set_xlabel('Longitude', fontsize=10)
-        ax.set_ylabel('Latitude', fontsize=10)
-        
-    if title:
-        ax.set_title(title, fontsize=12, fontweight='bold')
-        
-    ax.set_aspect('equal')
-    
-    return im
+# Note: create_interpolation_grid, interpolate_to_grid, and plot_gridded_surface
+# are now imported from mapping_utils.py to avoid code duplication
 
 
 # =============================================================================
@@ -280,39 +162,22 @@ def plot_gridded_surface(
 def create_three_panel_comparison(data, time_idx=25):
     """Create main comparison figure with gridded surfaces."""
     print(f"Creating Figure 1: Three-panel gridded comparison (Day {time_idx})...")
-    
-    Lon, Lat, _, _ = create_interpolation_grid()
+
     coords = data['coordinates']
-    
-    # Interpolate all three
-    obs_grid = interpolate_to_grid(coords, data['observed'][time_idx], Lon, Lat)
-    gam_grid = interpolate_to_grid(coords, data['gam_predictions'][time_idx], Lon, Lat)
-    hybrid_grid = interpolate_to_grid(coords, data['hybrid_predictions'][time_idx], Lon, Lat)
-    
-    # Common color limits
-    vmin = min(obs_grid.min(), gam_grid.min(), hybrid_grid.min())
-    vmax = max(obs_grid.max(), gam_grid.max(), hybrid_grid.max())
-    
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    
-    plot_gridded_surface(obs_grid, Lon, Lat, ax=axes[0],
-                        title='(a) Observed NO₂', vmin=vmin, vmax=vmax,
-                        contours=True, n_contours=8)
-    
-    plot_gridded_surface(gam_grid, Lon, Lat, ax=axes[1],
-                        title='(b) GAM-LUR Predicted', vmin=vmin, vmax=vmax,
-                        contours=True, n_contours=8)
-    
-    plot_gridded_surface(hybrid_grid, Lon, Lat, ax=axes[2],
-                        title='(c) Hybrid GAM-SSM Predicted', vmin=vmin, vmax=vmax,
-                        contours=True, n_contours=8)
-    
-    fig.suptitle(f'NO₂ Concentration Surfaces - Day {time_idx}', 
-                fontsize=14, fontweight='bold', y=1.02)
-    
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'fig1_three_panel_comparison.png', dpi=300, bbox_inches='tight')
-    plt.close()
+
+    # Use the unified module function
+    create_gridded_comparison(
+        coordinates=coords,
+        observed=data['observed'][time_idx],
+        baseline_pred=data['gam_predictions'][time_idx],
+        hybrid_pred=data['hybrid_predictions'][time_idx],
+        output_path=OUTPUT_DIR / 'fig1_three_panel_comparison.png',
+        lon_bounds=(DUBLIN_BOUNDS['lon_min'], DUBLIN_BOUNDS['lon_max']),
+        lat_bounds=(DUBLIN_BOUNDS['lat_min'], DUBLIN_BOUNDS['lat_max']),
+        resolution=GRID_RESOLUTION,
+        title_suffix=f' - Day {time_idx}',
+    )
+
     print(f"  Saved: {OUTPUT_DIR / 'fig1_three_panel_comparison.png'}")
 
 
@@ -322,86 +187,21 @@ def create_three_panel_comparison(data, time_idx=25):
 def create_six_panel_with_residuals(data, time_idx=25):
     """Create 2x3 panel figure with predictions and residuals."""
     print(f"Creating Figure 2: Six-panel with residuals (Day {time_idx})...")
-    
-    Lon, Lat, _, _ = create_interpolation_grid()
+
     coords = data['coordinates']
-    
-    # Interpolate
-    obs_grid = interpolate_to_grid(coords, data['observed'][time_idx], Lon, Lat)
-    gam_grid = interpolate_to_grid(coords, data['gam_predictions'][time_idx], Lon, Lat)
-    hybrid_grid = interpolate_to_grid(coords, data['hybrid_predictions'][time_idx], Lon, Lat)
-    
-    # Residuals at points, then interpolate
-    gam_resid = data['observed'][time_idx] - data['gam_predictions'][time_idx]
-    hybrid_resid = data['observed'][time_idx] - data['hybrid_predictions'][time_idx]
-    
-    gam_resid_grid = interpolate_to_grid(coords, gam_resid, Lon, Lat)
-    hybrid_resid_grid = interpolate_to_grid(coords, hybrid_resid, Lon, Lat)
-    
-    # Color limits
-    vmin_conc = min(obs_grid.min(), gam_grid.min(), hybrid_grid.min())
-    vmax_conc = max(obs_grid.max(), gam_grid.max(), hybrid_grid.max())
-    vmax_res = max(np.abs(gam_resid_grid).max(), np.abs(hybrid_resid_grid).max())
-    
-    fig = plt.figure(figsize=(18, 12))
-    gs = GridSpec(2, 3, figure=fig, hspace=0.2, wspace=0.25)
-    
-    # Row 1: Concentrations
-    ax1 = fig.add_subplot(gs[0, 0])
-    plot_gridded_surface(obs_grid, Lon, Lat, ax=ax1,
-                        title='(a) Observed NO₂', vmin=vmin_conc, vmax=vmax_conc)
-    
-    ax2 = fig.add_subplot(gs[0, 1])
-    plot_gridded_surface(gam_grid, Lon, Lat, ax=ax2,
-                        title='(b) GAM-LUR Predicted', vmin=vmin_conc, vmax=vmax_conc)
-    
-    ax3 = fig.add_subplot(gs[0, 2])
-    plot_gridded_surface(hybrid_grid, Lon, Lat, ax=ax3,
-                        title='(c) GAM-SSM Predicted', vmin=vmin_conc, vmax=vmax_conc)
-    
-    # Row 2: Residuals
-    ax4 = fig.add_subplot(gs[1, 0])
-    # Add metrics text instead of empty panel
-    ax4.axis('off')
-    gam_rmse = np.sqrt(np.mean(gam_resid**2))
-    hybrid_rmse = np.sqrt(np.mean(hybrid_resid**2))
-    improvement = (gam_rmse - hybrid_rmse) / gam_rmse * 100
-    
-    metrics_text = (
-        f"Model Performance (Day {time_idx})\n"
-        f"{'='*30}\n\n"
-        f"GAM-LUR:\n"
-        f"  RMSE: {gam_rmse:.2f} µg/m³\n"
-        f"  Mean residual: {gam_resid.mean():.2f}\n"
-        f"  SD residual: {gam_resid.std():.2f}\n\n"
-        f"GAM-SSM:\n"
-        f"  RMSE: {hybrid_rmse:.2f} µg/m³\n"
-        f"  Mean residual: {hybrid_resid.mean():.2f}\n"
-        f"  SD residual: {hybrid_resid.std():.2f}\n\n"
-        f"Improvement: {improvement:.1f}%"
+
+    # Use the unified module function
+    create_gridded_residual_map(
+        coordinates=coords,
+        observed=data['observed'][time_idx],
+        baseline_pred=data['gam_predictions'][time_idx],
+        hybrid_pred=data['hybrid_predictions'][time_idx],
+        output_path=OUTPUT_DIR / 'fig2_six_panel_residuals.png',
+        lon_bounds=(DUBLIN_BOUNDS['lon_min'], DUBLIN_BOUNDS['lon_max']),
+        lat_bounds=(DUBLIN_BOUNDS['lat_min'], DUBLIN_BOUNDS['lat_max']),
+        resolution=GRID_RESOLUTION,
     )
-    ax4.text(0.1, 0.9, metrics_text, transform=ax4.transAxes, fontsize=12,
-            verticalalignment='top', fontfamily='monospace',
-            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
-    ax4.set_title('(d) Performance Metrics', fontsize=12, fontweight='bold')
-    
-    ax5 = fig.add_subplot(gs[1, 1])
-    plot_gridded_surface(gam_resid_grid, Lon, Lat, ax=ax5,
-                        title='(e) GAM-LUR Residuals', 
-                        cmap='RdBu_r', vmin=-vmax_res, vmax=vmax_res,
-                        colorbar_label='Residual (µg/m³)')
-    
-    ax6 = fig.add_subplot(gs[1, 2])
-    plot_gridded_surface(hybrid_resid_grid, Lon, Lat, ax=ax6,
-                        title='(f) GAM-SSM Residuals',
-                        cmap='RdBu_r', vmin=-vmax_res, vmax=vmax_res,
-                        colorbar_label='Residual (µg/m³)')
-    
-    fig.suptitle(f'Spatial Comparison: GAM-LUR vs Hybrid GAM-SSM (Day {time_idx})',
-                fontsize=14, fontweight='bold', y=1.01)
-    
-    plt.savefig(OUTPUT_DIR / 'fig2_six_panel_residuals.png', dpi=300, bbox_inches='tight')
-    plt.close()
+
     print(f"  Saved: {OUTPUT_DIR / 'fig2_six_panel_residuals.png'}")
 
 

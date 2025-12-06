@@ -8,7 +8,10 @@ __pycache__/
 
 data/*
 
-RESPONSE_TO_REVIEWERS.md
+RESPONSE_TO_REVIEWERS*
+REFACTORING_NOTES*
+CHANGELOG_VISUALIZATION*
+README_VISUALIZATION*
 
 # Distribution / packaging
 .Python
@@ -207,4 +210,4 @@ secrets.json
 
 # Notebook outputs
 *.ipynb
-!examples/*.ipynb
+!experiments/*.ipynb
