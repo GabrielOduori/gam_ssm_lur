@@ -17,8 +17,14 @@ __version__ = "0.1.0"
 __author__ = "Gabriel Oduori"
 __email__ = "gabriel.oduori@ucd.ie"
 
-# Core models
-from gam_ssm_lur.models import HybridGAMSSM, SpatialGAM, StateSpaceModel
+# Core models and base classes
+from gam_ssm_lur.models import (
+    HybridGAMSSM,
+    SpatialGAM,
+    StateSpaceModel,
+    BaseEstimator,
+    ModelSummary,
+)
 
 # Inference algorithms
 from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, EMEstimator
@@ -33,9 +39,6 @@ from gam_ssm_lur.visualization import (
     DiagnosticsVisualizer,
     create_publication_figure_set,
 )
-
-# Base classes and utilities
-from gam_ssm_lur.base import BaseEstimator, ModelSummary
 from gam_ssm_lur import utils
 
 __all__ = [
