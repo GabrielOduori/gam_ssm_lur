@@ -16,19 +16,19 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 
 ## Key Features
 
-- 🎯 **Hybrid spatiotemporal modeling** combining interpretable GAMs with dynamic state space models
-- 📊 **Principled uncertainty quantification** via Kalman filtering and smoothing
+- **Hybrid spatiotemporal modeling** combining interpretable GAMs with dynamic state space models
+- **Principled uncertainty quantification** via Kalman filtering and smoothing
 - ⚡ **Scalable inference** through adaptive matrix representations (dense, sparse, block-diagonal)
-- 🔧 **Modular design** allowing component-wise customization
-- 📈 **Comprehensive diagnostics** for model validation and assessment
+- 🔧 **Modular design** allowing component-wise customisation
+- **Comprehensive diagnostics** for model validation and assessment
 
 ## Installation
 
-### From PyPI (recommended)
+<!-- ### From PyPI (recommended)
 
 ```bash
 pip install gam-ssm-lur
-```
+``` -->
 
 ### From source
 

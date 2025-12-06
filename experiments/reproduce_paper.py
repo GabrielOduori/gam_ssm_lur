@@ -393,90 +393,90 @@ def load_data(
     return observations, features, validation_stations
 
 
-def generate_demo_data() -> tuple:
-    """Generate synthetic data matching paper characteristics."""
-    np.random.seed(42)
+# def generate_demo_data() -> tuple:
+#     """Generate synthetic data matching paper characteristics."""
+#     np.random.seed(42)
     
-    n_locations = 100  # Subset for demo
-    n_days = 50
-    n_hours = n_days * 24
+#     n_locations = 100  # Subset for demo
+#     n_days = 50
+#     n_hours = n_days * 24
     
-    # Generate location grid
-    locations = pd.DataFrame({
-        'location_id': range(n_locations),
-        'lat': 53.3 + np.random.randn(n_locations) * 0.05,
-        'lon': -6.26 + np.random.randn(n_locations) * 0.08,
-    })
+#     # Generate location grid
+#     locations = pd.DataFrame({
+#         'location_id': range(n_locations),
+#         'lat': 53.3 + np.random.randn(n_locations) * 0.05,
+#         'lon': -6.26 + np.random.randn(n_locations) * 0.08,
+#     })
     
-    # Generate spatial features (simplified)
-    n_features = 56
-    feature_names = (
-        [f'motorway_{d}m' for d in [50, 100, 200, 500, 1000]] +
-        [f'primary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-        [f'secondary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-        [f'tertiary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-        [f'residential_{d}m' for d in [50, 100, 200, 500, 1000]] +
-        [f'industrial_{d}m' for d in [100, 200, 500, 1000]] +
-        [f'commercial_{d}m' for d in [100, 200, 500, 1000]] +
-        ['motorway_distance', 'primary_distance', 'industrial_distance'] +
-        ['traffic_volume', 'traffic_distance'] +
-        ['tropomi_no2'] +
-        [f'synthetic_noise_{i}' for i in range(n_features - 43)]
-    )
+#     # Generate spatial features (simplified)
+#     n_features = 56
+#     feature_names = (
+#         [f'motorway_{d}m' for d in [50, 100, 200, 500, 1000]] +
+#         [f'primary_{d}m' for d in [50, 100, 200, 500, 1000]] +
+#         [f'secondary_{d}m' for d in [50, 100, 200, 500, 1000]] +
+#         [f'tertiary_{d}m' for d in [50, 100, 200, 500, 1000]] +
+#         [f'residential_{d}m' for d in [50, 100, 200, 500, 1000]] +
+#         [f'industrial_{d}m' for d in [100, 200, 500, 1000]] +
+#         [f'commercial_{d}m' for d in [100, 200, 500, 1000]] +
+#         ['motorway_distance', 'primary_distance', 'industrial_distance'] +
+#         ['traffic_volume', 'traffic_distance'] +
+#         ['tropomi_no2'] +
+#         [f'synthetic_noise_{i}' for i in range(n_features - 43)]
+#     )
     
-    features = pd.DataFrame(
-        np.random.exponential(scale=500, size=(n_locations, len(feature_names))),
-        columns=feature_names
-    )
-    features['location_id'] = range(n_locations)
+#     features = pd.DataFrame(
+#         np.random.exponential(scale=500, size=(n_locations, len(feature_names))),
+#         columns=feature_names
+#     )
+#     features['location_id'] = range(n_locations)
     
-    # Generate observations with realistic patterns
-    timestamps = pd.date_range('2023-01-01', periods=n_hours, freq='H')
+#     # Generate observations with realistic patterns
+#     timestamps = pd.date_range('2023-01-01', periods=n_hours, freq='H')
     
-    # Spatial baseline
-    spatial_effect = (
-        0.02 * features['motorway_50m'].values +
-        0.01 * features['industrial_100m'].values -
-        0.005 * features['motorway_distance'].values
-    )
-    spatial_effect = (spatial_effect - spatial_effect.mean()) * 5 + 20
+#     # Spatial baseline
+#     spatial_effect = (
+#         0.02 * features['motorway_50m'].values +
+#         0.01 * features['industrial_100m'].values -
+#         0.005 * features['motorway_distance'].values
+#     )
+#     spatial_effect = (spatial_effect - spatial_effect.mean()) * 5 + 20
     
-    # Temporal pattern (diurnal + weekly + trend)
-    hour_effect = 5 * np.sin(2 * np.pi * np.arange(n_hours) / 24 - np.pi/2)  # Peak at 8am
-    day_effect = 2 * np.sin(2 * np.pi * np.arange(n_hours) / (24*7))  # Weekly cycle
-    ar_process = np.zeros(n_hours)
-    ar_process[0] = np.random.randn()
-    for t in range(1, n_hours):
-        ar_process[t] = 0.9 * ar_process[t-1] + np.random.randn() * 0.5
-    temporal_effect = hour_effect + day_effect + ar_process
+#     # Temporal pattern (diurnal + weekly + trend)
+#     hour_effect = 5 * np.sin(2 * np.pi * np.arange(n_hours) / 24 - np.pi/2)  # Peak at 8am
+#     day_effect = 2 * np.sin(2 * np.pi * np.arange(n_hours) / (24*7))  # Weekly cycle
+#     ar_process = np.zeros(n_hours)
+#     ar_process[0] = np.random.randn()
+#     for t in range(1, n_hours):
+#         ar_process[t] = 0.9 * ar_process[t-1] + np.random.randn() * 0.5
+#     temporal_effect = hour_effect + day_effect + ar_process
     
-    # Generate observations
-    obs_list = []
-    for t, ts in enumerate(timestamps):
-        for s in range(n_locations):
-            no2 = spatial_effect[s] + temporal_effect[t] + np.random.randn() * 2
-            no2 = max(0, no2)  # Non-negative
-            obs_list.append({
-                'timestamp': ts,
-                'location_id': s,
-                'no2': no2,
-                'lat': locations.loc[s, 'lat'],
-                'lon': locations.loc[s, 'lon'],
-            })
+#     # Generate observations
+#     obs_list = []
+#     for t, ts in enumerate(timestamps):
+#         for s in range(n_locations):
+#             no2 = spatial_effect[s] + temporal_effect[t] + np.random.randn() * 2
+#             no2 = max(0, no2)  # Non-negative
+#             obs_list.append({
+#                 'timestamp': ts,
+#                 'location_id': s,
+#                 'no2': no2,
+#                 'lat': locations.loc[s, 'lat'],
+#                 'lon': locations.loc[s, 'lon'],
+#             })
     
-    observations = pd.DataFrame(obs_list)
+#     observations = pd.DataFrame(obs_list)
     
-    # Validation stations (8 EPA sites)
-    val_idx = np.random.choice(n_locations, 8, replace=False)
-    validation_stations = locations.iloc[val_idx].copy()
-    validation_stations['station_name'] = [f'EPA_Station_{i}' for i in range(8)]
+#     # Validation stations (8 EPA sites)
+#     val_idx = np.random.choice(n_locations, 8, replace=False)
+#     validation_stations = locations.iloc[val_idx].copy()
+#     validation_stations['station_name'] = [f'EPA_Station_{i}' for i in range(8)]
     
-    return observations, features, validation_stations
+#     return observations, features, validation_stations
 
 
 def fit_baseline_gam(X: np.ndarray, y: np.ndarray, feature_names: list) -> dict:
     """Fit static GAM-LUR baseline model."""
-    from gam_ssm_lur.spatial_gam import SpatialGAM
+    from gam_ssm_lur.models.spatial_gam import SpatialGAM
     
     logger.info("Fitting baseline GAM-LUR model...")
     
@@ -1307,7 +1307,7 @@ Examples:
     )
 
     # =========================================================================
-    # GRIDDED/INTERPOLATED SURFACE MAPS (new publication-quality figures)
+    # GRIDDED/INTERPOLATED SURFACE MAPS (FIGURES 15-18)
     # =========================================================================
     logger.info("Creating gridded interpolated surface maps...")
 
