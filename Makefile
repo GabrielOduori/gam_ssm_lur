@@ -1,6 +1,6 @@
 # Makefile for GAM-SSM-LUR development
 
-.PHONY: help install install-dev test lint format clean docs build publish
+.PHONY: help install install-dev test test-quick lint format check clean docs build publish publish-test example reproduce
 
 PYTHON := python
 PIP := pip
@@ -50,12 +50,12 @@ test-quick:
 
 # Code quality
 lint:
-	$(RUFF) check src/ tests/
+	$(RUFF) check src/ tests/ experiments/
 	$(MYPY) src/gam_ssm_lur/ --ignore-missing-imports
 
 format:
-	$(BLACK) src/ tests/ examples/
-	$(RUFF) check src/ tests/ --fix
+	$(BLACK) src/ tests/ experiments/
+	$(RUFF) check src/ tests/ experiments/ --fix
 
 check: format lint test
 
@@ -64,7 +64,11 @@ build: clean
 	$(PYTHON) -m build
 
 docs:
-	cd docs && make html
+	@if [ -d docs ]; then \
+		cd docs && make html; \
+	else \
+		echo "docs/ directory not found; nothing to build."; \
+	fi
 
 # Clean
 clean:
@@ -82,10 +86,10 @@ clean:
 
 # Examples
 example:
-	$(PYTHON) examples/01_basic_usage.py
+	$(PYTHON) experiments/01_basic_usage.py
 
 reproduce:
-	$(PYTHON) examples/reproduce_paper.py --data-dir data/ --output-dir results/
+	$(PYTHON) experiments/reproduce_paper.py --data-dir data/ --output-dir results/
 
 # Publishing (use with caution)
 publish-test:

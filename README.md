@@ -37,7 +37,7 @@ git clone https://github.com/GabrielOduori/lur_space_state_model.git
 cd lur_space_state_model
 pip install -e ".[dev]"
 ```
-
+<!-- 
 ### Optional dependencies
 
 ```bash
@@ -49,7 +49,7 @@ pip install gam-ssm-lur[satellite]
 
 # For development
 pip install gam-ssm-lur[dev]
-```
+``` -->
 
 ## Quick Start
 
