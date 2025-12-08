@@ -166,7 +166,7 @@ def main():
         )
     
     # =========================================================================
-    # Step 2: Feature selection (optional but recommended)
+    # Step 2: Feature selection 
     # =========================================================================
     logger.info("=" * 60)
     logger.info("Step 2: Feature selection")
