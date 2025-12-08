@@ -9,10 +9,9 @@ This module contains algorithms for parameter estimation and state inference:
 
 from gam_ssm_lur.inference.kalman import (
     KalmanFilter,
-    RTSSmoother,
     FilterResult,
-    SmootherResult,
 )
+from gam_ssm_lur.inference.smoother import RTSSmoother, SmootherResult
 from gam_ssm_lur.inference.em import EMEstimator, EMResult
 
 __all__ = [

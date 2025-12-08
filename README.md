@@ -165,19 +165,19 @@ See the `experiments/` directory for detailed tutorials:
 To reproduce the results from the paper:
 
 ```bash
-# Option 1: Run with demo data (no file needed)
-python experiments/reproduce_paper.py
+# # Option 1: Run with demo data (no file needed)
+# python experiments/reproduce_paper.py
 
-# Option 2: Run with your own data (auto-detects columns interactively)
-python experiments/reproduce_paper.py --data-file /path/to/your_data.csv
+# Option 1: Run with your own data (auto-detects columns interactively)
+python experiments/reproduce_paper.py --data-file data/data_table.csv
 
-# Option 3: Quick test with limited records (faster for testing)
+# Option 2: Quick test with limited records (faster for testing)
 python experiments/reproduce_paper.py \
-  --data-file /path/to/your_data.csv \
+  --data-file data/data_table.csv \
   --max-records 100 \
   --yes
 
-# Option 4: Run with specific column names (non-interactive)
+# Option 3: Run with specific column names (non-interactive)
 python experiments/reproduce_paper.py \
   --data-file /path/to/your_data.csv \
   --timestamp-col timestamp \
@@ -187,9 +187,15 @@ python experiments/reproduce_paper.py \
   --lon-col longitude \
   --yes
 
-# Option 5: Customize output location
+# Option 4: Large datasets — force diagonal scalability mode to save memory
 python experiments/reproduce_paper.py \
   --data-file /path/to/your_data.csv \
+  --scalability-mode diagonal \
+  --yes
+
+# Option 5: Customize output location
+python experiments/reproduce_paper.py \
+  --data-file data/data_table.csv \
   --output-dir my_results \
   --run-name experiment_2024
 ```

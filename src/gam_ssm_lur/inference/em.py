@@ -25,7 +25,7 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
-from gam_ssm_lur.inference.kalman import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
+from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
 
 
 logger = logging.getLogger(__name__)

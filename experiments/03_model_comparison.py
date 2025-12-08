@@ -197,7 +197,7 @@ def fit_and_compare_models(data: dict, output_dir: Path):
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
     
     from gam_ssm_lur import HybridGAMSSM
-    from gam_ssm_lur.spatial_gam import SpatialGAM
+    from gam_ssm_lur import SpatialGAM
     from gam_ssm_lur.features import FeatureSelector
     from gam_ssm_lur.visualization import (
         SpatialVisualizer,

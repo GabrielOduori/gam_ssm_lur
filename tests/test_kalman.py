@@ -5,7 +5,7 @@ Tests for Kalman filter and RTS smoother.
 import numpy as np
 import pytest
 
-from gam_ssm_lur.kalman import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
+from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
 
 
 class TestKalmanFilter:

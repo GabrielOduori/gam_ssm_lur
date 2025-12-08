@@ -508,6 +508,7 @@ def fit_hybrid_model(
     time_idx: np.ndarray,
     loc_idx: np.ndarray,
     feature_names: list,
+    scalability_mode: str = "auto",
 ) -> dict:
     """Fit hybrid GAM-SSM model."""
     from gam_ssm_lur import HybridGAMSSM
@@ -519,7 +520,7 @@ def fit_hybrid_model(
         gam_lam='auto',
         em_max_iter=50,
         em_tol=1e-6,
-        scalability_mode='auto',
+        scalability_mode=scalability_mode,
         confidence_level=0.95,
         random_state=42,
     )
@@ -1062,6 +1063,11 @@ Examples:
                         help='Skip interactive confirmation (use auto-detected or provided columns)')
     parser.add_argument('--max-records', type=int, default=None,
                         help='Maximum number of records to load for testing (default: load all data)')
+    parser.add_argument('--scalability-mode', type=str, default='auto',
+                        choices=['auto', 'dense', 'diagonal', 'block'],
+                        help='Matrix scalability mode for Kalman filter/smoother; use diagonal for large datasets')
+    parser.add_argument('--diagonal-threshold', type=int, default=500,
+                        help='If scalability-mode is auto and number of locations exceeds this, switch to diagonal')
     args = parser.parse_args()
 
     # Determine column mappings
@@ -1136,6 +1142,18 @@ Examples:
     loc_idx = df['location_id'].values
     
     logger.info(f"Data shape: X={X.shape}, y={y.shape}")
+    n_locations = len(np.unique(loc_idx))
+    n_times = len(time_labels)
+    
+    # Choose scalability mode; auto-switch to diagonal for large location sets
+    scalability_mode = args.scalability_mode
+    if scalability_mode == 'auto' and n_locations >= args.diagonal_threshold:
+        logger.info(
+            "Auto-switching scalability mode to 'diagonal' "
+            f"(locations={n_locations} >= threshold={args.diagonal_threshold})"
+        )
+        scalability_mode = 'diagonal'
+    logger.info(f"Using scalability mode: {scalability_mode} (locations={n_locations}, times={n_times})")
     
     # Feature selection
     logger.info("=" * 70)
@@ -1173,7 +1191,8 @@ Examples:
     logger.info("=" * 70)
     
     hybrid = fit_hybrid_model(
-        X_selected.values, y, time_idx, loc_idx, selected_features
+        X_selected.values, y, time_idx, loc_idx, selected_features,
+        scalability_mode=scalability_mode,
     )
     logger.info(f"Hybrid RMSE: {hybrid['metrics']['rmse']:.4f}")
     logger.info(f"Hybrid R²: {hybrid['metrics']['r2']:.4f}")
@@ -1379,6 +1398,46 @@ Examples:
         output_path=paths['figures_dir'] / 'fig18_temporal_sequence.png',
     )
     logger.info(f"Saved temporal sequence to {paths['figures_dir'] / 'fig18_temporal_sequence.png'}")
+
+    # Save enriched predictions with metadata for downstream comparison
+    loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates().set_index('location_id')
+    lat_map = loc_meta['lat'].to_dict()
+    lon_map = loc_meta['lon'].to_dict()
+
+    # Align predictions to the observed training pairs (same length as baseline/y)
+    time_map = {t: i for i, t in enumerate(hybrid['model'].time_ids_)}
+    loc_map = {l: i for i, l in enumerate(hybrid['model'].location_ids_)}
+    obs_indices = zip(hybrid['model']._time_index_train, hybrid['model']._location_index_train)
+    pred_hybrid_obs = []
+    pred_hybrid_lower_obs = []
+    pred_hybrid_upper_obs = []
+    for t_idx, l_idx in obs_indices:
+        t_pos = time_map[t_idx]
+        l_pos = loc_map[l_idx]
+        pred_hybrid_obs.append(hybrid['predictions'].total[t_pos, l_pos])
+        pred_hybrid_lower_obs.append(hybrid['predictions'].lower[t_pos, l_pos])
+        pred_hybrid_upper_obs.append(hybrid['predictions'].upper[t_pos, l_pos])
+    
+    export_df = pd.DataFrame({
+        "timestamp": time_labels[hybrid['model']._time_index_train],
+        "location_id": hybrid['model']._location_index_train,
+        "epa_values": y,
+        "pred_baseline": baseline['predictions'],
+        "pred_hybrid": pred_hybrid_obs,
+        "pred_hybrid_lower": pred_hybrid_lower_obs,
+        "pred_hybrid_upper": pred_hybrid_upper_obs,
+    })
+    export_df["residual_hybrid"] = export_df["epa_values"] - export_df["pred_hybrid"]
+    export_df["latitude"] = export_df["location_id"].map(lat_map)
+    export_df["longitude"] = export_df["location_id"].map(lon_map)
+
+    if "no2_values" in features.columns:
+        no2_map = features.set_index('location_id')["no2_values"].to_dict()
+        export_df["no2_values"] = export_df["location_id"].map(no2_map)
+
+    predictions_path = paths['tables_dir'] / "predictions_with_intervals.csv"
+    export_df.to_csv(predictions_path, index=False)
+    logger.info(f"Saved enriched predictions to {predictions_path}")
 
     # Save model
     hybrid['model'].save(paths['models_dir'] / 'hybrid_gam_ssm')

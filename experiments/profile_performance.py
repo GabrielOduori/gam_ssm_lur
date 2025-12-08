@@ -20,7 +20,9 @@ import time
 
 import numpy as np
 
-from gam_ssm_lur.hybrid_model import HybridGAMSSM
+# from gam_ssm_lur.hybrid_model import HybridGAMSSM
+# from gam_ssm_lur.models.hybrid import HybridGAMSSM
+from gam_ssm_lur import HybridGAMSSM
 
 
 def generate_synthetic(

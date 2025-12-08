@@ -23,7 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from gam_ssm_lur.inference.kalman import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
+from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, FilterResult, SmootherResult
 from gam_ssm_lur.inference.em import EMEstimator, EMResult
 
 
