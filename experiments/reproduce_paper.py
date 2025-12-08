@@ -27,6 +27,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# Ensure local src/ is importable when running as a script
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
 from output_utils import make_experiment_dirs
 from mapping_utils import (
     create_gridded_comparison,
@@ -34,6 +38,7 @@ from mapping_utils import (
     create_uncertainty_surface,
     create_temporal_gridded_sequence,
 )
+from gam_ssm_lur.data_check import check_data_availability
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +63,9 @@ BASE_FEATURE_PREFIXES = [
     "trunk",
     "tertiary",
 ]
+
+DEFAULT_DATA_URL = "https://zenodo.org/record/16534138/files/data_table.zip?download=1"
+DEFAULT_DATA_FILE = Path("data") / "data_table.csv"
 
 
 def auto_detect_columns(df: pd.DataFrame) -> dict[str, str]:
@@ -335,9 +343,9 @@ def load_data(
     # Path 1: user-provided merged table
     if data_file:
         if not data_file.exists():
-            raise FileNotFoundError(f"Merged data file not found: {data_file}")
+            raise FileNotFoundError(f"Data file not found: {data_file}")
 
-        logger.info(f"Using merged data file: {data_file}")
+        logger.info(f"Downloading Data from Zenodo: {data_file}")
 
         # Load with optional row limit
         if max_records:
@@ -376,102 +384,13 @@ def load_data(
         validation_stations = None
         return observations, features, validation_stations
     
-    # Path 2: separate files (default demo setup)
-    obs_path = data_dir / "dublin_no2_2023.csv"
-    feat_path = data_dir / "spatial_features.csv"
-    val_path = data_dir / "epa_stations.csv"
-    
-    if obs_path.exists() and feat_path.exists():
-        observations = pd.read_csv(obs_path, parse_dates=['timestamp'])
-        features = pd.read_csv(feat_path)
-        validation_stations = pd.read_csv(val_path) if val_path.exists() else None
-        logger.info(f"Loaded {len(observations)} observations, {len(features)} feature sets")
     else:
-        logger.warning("Real data not found. Generating synthetic data for demonstration.")
-        observations, features, validation_stations = generate_demo_data()
+        raise ValueError(
+            "No data file provided and unable to proceed. "
+            "Please specify --data-file with the path to your CSV dataset."
+        )
         
     return observations, features, validation_stations
-
-
-# def generate_demo_data() -> tuple:
-#     """Generate synthetic data matching paper characteristics."""
-#     np.random.seed(42)
-    
-#     n_locations = 100  # Subset for demo
-#     n_days = 50
-#     n_hours = n_days * 24
-    
-#     # Generate location grid
-#     locations = pd.DataFrame({
-#         'location_id': range(n_locations),
-#         'lat': 53.3 + np.random.randn(n_locations) * 0.05,
-#         'lon': -6.26 + np.random.randn(n_locations) * 0.08,
-#     })
-    
-#     # Generate spatial features (simplified)
-#     n_features = 56
-#     feature_names = (
-#         [f'motorway_{d}m' for d in [50, 100, 200, 500, 1000]] +
-#         [f'primary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-#         [f'secondary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-#         [f'tertiary_{d}m' for d in [50, 100, 200, 500, 1000]] +
-#         [f'residential_{d}m' for d in [50, 100, 200, 500, 1000]] +
-#         [f'industrial_{d}m' for d in [100, 200, 500, 1000]] +
-#         [f'commercial_{d}m' for d in [100, 200, 500, 1000]] +
-#         ['motorway_distance', 'primary_distance', 'industrial_distance'] +
-#         ['traffic_volume', 'traffic_distance'] +
-#         ['tropomi_no2'] +
-#         [f'synthetic_noise_{i}' for i in range(n_features - 43)]
-#     )
-    
-#     features = pd.DataFrame(
-#         np.random.exponential(scale=500, size=(n_locations, len(feature_names))),
-#         columns=feature_names
-#     )
-#     features['location_id'] = range(n_locations)
-    
-#     # Generate observations with realistic patterns
-#     timestamps = pd.date_range('2023-01-01', periods=n_hours, freq='H')
-    
-#     # Spatial baseline
-#     spatial_effect = (
-#         0.02 * features['motorway_50m'].values +
-#         0.01 * features['industrial_100m'].values -
-#         0.005 * features['motorway_distance'].values
-#     )
-#     spatial_effect = (spatial_effect - spatial_effect.mean()) * 5 + 20
-    
-#     # Temporal pattern (diurnal + weekly + trend)
-#     hour_effect = 5 * np.sin(2 * np.pi * np.arange(n_hours) / 24 - np.pi/2)  # Peak at 8am
-#     day_effect = 2 * np.sin(2 * np.pi * np.arange(n_hours) / (24*7))  # Weekly cycle
-#     ar_process = np.zeros(n_hours)
-#     ar_process[0] = np.random.randn()
-#     for t in range(1, n_hours):
-#         ar_process[t] = 0.9 * ar_process[t-1] + np.random.randn() * 0.5
-#     temporal_effect = hour_effect + day_effect + ar_process
-    
-#     # Generate observations
-#     obs_list = []
-#     for t, ts in enumerate(timestamps):
-#         for s in range(n_locations):
-#             no2 = spatial_effect[s] + temporal_effect[t] + np.random.randn() * 2
-#             no2 = max(0, no2)  # Non-negative
-#             obs_list.append({
-#                 'timestamp': ts,
-#                 'location_id': s,
-#                 'no2': no2,
-#                 'lat': locations.loc[s, 'lat'],
-#                 'lon': locations.loc[s, 'lon'],
-#             })
-    
-#     observations = pd.DataFrame(obs_list)
-    
-#     # Validation stations (8 EPA sites)
-#     val_idx = np.random.choice(n_locations, 8, replace=False)
-#     validation_stations = locations.iloc[val_idx].copy()
-#     validation_stations['station_name'] = [f'EPA_Station_{i}' for i in range(8)]
-    
-#     return observations, features, validation_stations
 
 
 def fit_baseline_gam(X: np.ndarray, y: np.ndarray, feature_names: list) -> dict:
@@ -1068,40 +987,51 @@ Examples:
                         help='Matrix scalability mode for Kalman filter/smoother; use diagonal for large datasets')
     parser.add_argument('--diagonal-threshold', type=int, default=500,
                         help='If scalability-mode is auto and number of locations exceeds this, switch to diagonal')
+    parser.add_argument('--skip-gridded-plots', action='store_true',
+                        help='Skip gridded/temporal map outputs (Figures 15-18)')
     args = parser.parse_args()
 
-    # Determine column mappings
-    if args.data_file and args.data_file.exists():
-        # Validate and get column mappings
-        provided_args = {
-            'timestamp_col': args.timestamp_col,
-            'target_col': args.target_col,
-            'location_col': args.location_col,
-            'lat_col': args.lat_col,
-            'lon_col': args.lon_col,
-            'fallback_target_col': args.fallback_target_col,
-        }
-        column_mapping = validate_and_confirm_columns(
-            args.data_file,
-            provided_args,
-            interactive=not args.yes,
-        )
-        # Update args with validated columns
-        args.timestamp_col = column_mapping['timestamp_col']
-        args.target_col = column_mapping['target_col']
-        args.location_col = column_mapping['location_col']
-        args.lat_col = column_mapping['lat_col']
-        args.lon_col = column_mapping['lon_col']
-        args.fallback_target_col = column_mapping.get('fallback_target_col')
-        data_dir = args.data_file.parent
-    elif args.data_file:
-        logger.warning(f"Data file not found: {args.data_file}")
-        logger.info("Falling back to demo data generation...")
-        args.data_file = None
-        data_dir = Path('.')
+    # Ensure data is available (download from Zenodo if missing)
+    if args.data_file:
+        target_file = args.data_file
     else:
-        logger.info("No data file provided. Using demo data...")
-        data_dir = Path('.')
+        target_file = DEFAULT_DATA_FILE
+
+    data_dir = target_file.parent
+
+    try:
+        check_data_availability(target_file, DEFAULT_DATA_URL, data_dir)
+    except Exception as exc:
+        message = (
+            f"Data file {target_file} is missing and automatic download failed. "
+            f"Please download it manually from {DEFAULT_DATA_URL} and place it in {data_dir}."
+        )
+        logger.error(message)
+        raise RuntimeError(message) from exc
+
+    args.data_file = target_file
+
+    # Determine column mappings
+    provided_args = {
+        'timestamp_col': args.timestamp_col,
+        'target_col': args.target_col,
+        'location_col': args.location_col,
+        'lat_col': args.lat_col,
+        'lon_col': args.lon_col,
+        'fallback_target_col': args.fallback_target_col,
+    }
+    column_mapping = validate_and_confirm_columns(
+        args.data_file,
+        provided_args,
+        interactive=not args.yes,
+    )
+    # Update args with validated columns
+    args.timestamp_col = column_mapping['timestamp_col']
+    args.target_col = column_mapping['target_col']
+    args.location_col = column_mapping['location_col']
+    args.lat_col = column_mapping['lat_col']
+    args.lon_col = column_mapping['lon_col']
+    args.fallback_target_col = column_mapping.get('fallback_target_col')
 
     # Setup
     paths = setup_paths(data_dir, args.output_dir, args.run_name)
@@ -1109,10 +1039,6 @@ Examples:
     logger.info("=" * 70)
     logger.info("GAM-SSM-LUR Paper Reproduction")
     logger.info("=" * 70)
-    
-    # Add src to path for development
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
     
     # Load data
     observations, features, validation_stations = load_data(
@@ -1328,6 +1254,10 @@ Examples:
     # =========================================================================
     # GRIDDED/INTERPOLATED SURFACE MAPS (FIGURES 15-18)
     # =========================================================================
+    if args.skip_gridded_plots:
+        logger.info("Skipping gridded/temporal map outputs (Figures 15-18) per --skip-gridded-plots.")
+        return
+
     logger.info("Creating gridded interpolated surface maps...")
 
     # Prepare data for gridded maps
@@ -1335,69 +1265,77 @@ Examples:
     loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates()
     loc_meta = loc_meta.set_index('location_id').loc[hybrid['model'].location_ids_]
     coordinates = loc_meta[['lon', 'lat']].values
+    unique_coords = np.unique(coordinates, axis=0)
+    if unique_coords.shape[0] < 4:
+        logger.warning(
+            "Skipping gridded interpolation maps (Figures 15-18): "
+            f"only {unique_coords.shape[0]} unique locations after subsampling; "
+            "increase data volume or rerun without --max-records."
+        )
+    else:
 
-    # Figure 15: Gridded three-panel comparison (time-averaged)
-    # Average over time for spatial comparison
-    y_obs_mean = hybrid['model']._y_matrix.mean(axis=0)
-    baseline_pred_matrix = np.full_like(hybrid['model']._y_matrix, np.nan)
+        # Figure 15: Gridded three-panel comparison (time-averaged)
+        # Average over time for spatial comparison
+        y_obs_mean = hybrid['model']._y_matrix.mean(axis=0)
+        baseline_pred_matrix = np.full_like(hybrid['model']._y_matrix, np.nan)
 
-    # Rebuild baseline predictions in matrix form
-    time_map = {t: i for i, t in enumerate(hybrid['model'].time_ids_)}
-    loc_map = {l: i for i, l in enumerate(hybrid['model'].location_ids_)}
-    for v, t, l in zip(baseline['predictions'], hybrid['model']._time_index_train, hybrid['model']._location_index_train):
-        t_pos = time_map[t]
-        l_pos = loc_map[l]
-        baseline_pred_matrix[t_pos, l_pos] = v
+        # Rebuild baseline predictions in matrix form
+        time_map = {t: i for i, t in enumerate(hybrid['model'].time_ids_)}
+        loc_map = {l: i for i, l in enumerate(hybrid['model'].location_ids_)}
+        for v, t, l in zip(baseline['predictions'], hybrid['model']._time_index_train, hybrid['model']._location_index_train):
+            t_pos = time_map[t]
+            l_pos = loc_map[l]
+            baseline_pred_matrix[t_pos, l_pos] = v
 
-    baseline_mean = np.nanmean(baseline_pred_matrix, axis=0)
-    hybrid_mean = hybrid['predictions'].total.mean(axis=0)
+        baseline_mean = np.nanmean(baseline_pred_matrix, axis=0)
+        hybrid_mean = hybrid['predictions'].total.mean(axis=0)
 
-    create_gridded_comparison(
-        coordinates=coordinates,
-        observed=y_obs_mean,
-        baseline_pred=baseline_mean,
-        hybrid_pred=hybrid_mean,
-        output_path=paths['figures_dir'] / 'fig15_gridded_comparison.png',
-        title_suffix=' (Time-Averaged)',
-    )
-    logger.info(f"Saved gridded comparison to {paths['figures_dir'] / 'fig15_gridded_comparison.png'}")
+        create_gridded_comparison(
+            coordinates=coordinates,
+            observed=y_obs_mean,
+            baseline_pred=baseline_mean,
+            hybrid_pred=hybrid_mean,
+            output_path=paths['figures_dir'] / 'fig15_gridded_comparison.png',
+            title_suffix=' (Time-Averaged)',
+        )
+        logger.info(f"Saved gridded comparison to {paths['figures_dir'] / 'fig15_gridded_comparison.png'}")
 
-    # Figure 16: Gridded residual maps with performance metrics
-    create_gridded_residual_map(
-        coordinates=coordinates,
-        observed=y_obs_mean,
-        baseline_pred=baseline_mean,
-        hybrid_pred=hybrid_mean,
-        output_path=paths['figures_dir'] / 'fig16_gridded_residuals.png',
-    )
-    logger.info(f"Saved gridded residuals to {paths['figures_dir'] / 'fig16_gridded_residuals.png'}")
+        # Figure 16: Gridded residual maps with performance metrics
+        create_gridded_residual_map(
+            coordinates=coordinates,
+            observed=y_obs_mean,
+            baseline_pred=baseline_mean,
+            hybrid_pred=hybrid_mean,
+            output_path=paths['figures_dir'] / 'fig16_gridded_residuals.png',
+        )
+        logger.info(f"Saved gridded residuals to {paths['figures_dir'] / 'fig16_gridded_residuals.png'}")
 
-    # Figure 17: Uncertainty surface map
-    # Get prediction uncertainty (averaged over time)
-    uncertainty_matrix = (hybrid['predictions'].upper - hybrid['predictions'].lower) / (2 * 1.96)  # Convert to SD
-    mean_uncertainty = uncertainty_matrix.mean(axis=0)
+        # Figure 17: Uncertainty surface map
+        # Get prediction uncertainty (averaged over time)
+        uncertainty_matrix = (hybrid['predictions'].upper - hybrid['predictions'].lower) / (2 * 1.96)  # Convert to SD
+        mean_uncertainty = uncertainty_matrix.mean(axis=0)
 
-    create_uncertainty_surface(
-        coordinates=coordinates,
-        predictions=hybrid_mean,
-        std_dev=mean_uncertainty,
-        output_path=paths['figures_dir'] / 'fig17_uncertainty_surface.png',
-    )
-    logger.info(f"Saved uncertainty surface to {paths['figures_dir'] / 'fig17_uncertainty_surface.png'}")
+        create_uncertainty_surface(
+            coordinates=coordinates,
+            predictions=hybrid_mean,
+            std_dev=mean_uncertainty,
+            output_path=paths['figures_dir'] / 'fig17_uncertainty_surface.png',
+        )
+        logger.info(f"Saved uncertainty surface to {paths['figures_dir'] / 'fig17_uncertainty_surface.png'}")
 
-    # Figure 18: Temporal sequence of gridded maps
-    # Select 5 time points across the dataset
-    n_times = hybrid['model'].n_times_
-    time_points = [0, n_times//4, n_times//2, 3*n_times//4, n_times-1]
+        # Figure 18: Temporal sequence of gridded maps
+        # Select 5 time points across the dataset
+        n_times = hybrid['model'].n_times_
+        time_points = [0, n_times//4, n_times//2, 3*n_times//4, n_times-1]
 
-    create_temporal_gridded_sequence(
-        coordinates=coordinates,
-        observed_matrix=hybrid['model']._y_matrix,
-        predicted_matrix=hybrid['predictions'].total,
-        time_points=time_points,
-        output_path=paths['figures_dir'] / 'fig18_temporal_sequence.png',
-    )
-    logger.info(f"Saved temporal sequence to {paths['figures_dir'] / 'fig18_temporal_sequence.png'}")
+        create_temporal_gridded_sequence(
+            coordinates=coordinates,
+            observed_matrix=hybrid['model']._y_matrix,
+            predicted_matrix=hybrid['predictions'].total,
+            time_points=time_points,
+            output_path=paths['figures_dir'] / 'fig18_temporal_sequence.png',
+        )
+        logger.info(f"Saved temporal sequence to {paths['figures_dir'] / 'fig18_temporal_sequence.png'}")
 
     # Save enriched predictions with metadata for downstream comparison
     loc_meta = observations[['location_id', 'lat', 'lon']].drop_duplicates().set_index('location_id')
@@ -1469,4 +1407,3 @@ if __name__ == "__main__":
     # A cleaner print would be just seconds, or a more precise unit conversion.
     print(f"Total Execution Time: {end_time - start_time} seconds")
     print(f"Total Execution Time: {(end_time - start_time) / 60} minutes")
-
