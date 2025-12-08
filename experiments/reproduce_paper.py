@@ -1448,5 +1448,25 @@ Examples:
     logger.info("=" * 70)
 
 
+import time
+
+
+
 if __name__ == "__main__":
+    # Calculate and display the elapsed time
+
+    # Record the start time
+    start_time = time.time()
+
+    print(f"Start Time: {start_time}")
+
     main()
+
+    end_time = time.time()
+
+    print(f"End Time: {end_time}")
+    # Note: The calculation for total minutes is correct, but the unit string is a bit unusual. 
+    # A cleaner print would be just seconds, or a more precise unit conversion.
+    print(f"Total Execution Time: {end_time - start_time} seconds")
+    print(f"Total Execution Time: {(end_time - start_time) / 60} minutes")
+
