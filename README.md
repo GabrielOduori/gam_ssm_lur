@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A Python framework for spatiotemporal air pollution modeling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.
+A Python framework for spatiotemporal air pollution modelling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.
 
 ## Overview
 
@@ -16,10 +16,10 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 
 ## Key Features
 
-- **Hybrid spatiotemporal modeling** combining interpretable GAMs with dynamic state space models
+- **Hybrid spatiotemporal modelling** combining interpretable GAMs with dynamic state space models
 - **Principled uncertainty quantification** via Kalman filtering and smoothing
-- ⚡ **Scalable inference** through adaptive matrix representations (dense, sparse, block-diagonal)
-- 🔧 **Modular design** allowing component-wise customisation
+- **Scalable inference** through adaptive matrix representations (dense, sparse, block-diagonal)
+- **Modular design** allowing component-wise customisation
 - **Comprehensive diagnostics** for model validation and assessment
 
 ## Installation
@@ -62,7 +62,7 @@ from gam_ssm_lur.evaluation import ModelEvaluator
 
 # Load your data
 data = pd.read_csv("no2_observations.csv")
-features = pd.read_csv("spatial_features.csv")
+
 
 # Feature selection pipeline
 selector = FeatureSelector(
@@ -165,17 +165,22 @@ See the `experiments/` directory for detailed tutorials:
 To reproduce the results from the paper:
 
 ```bash
-# # Option 1: Run with demo data (no file needed)
-# python experiments/reproduce_paper.py
+# If required data files are missing, the script will automatically download and
+# extract the Zenodo archive (https://zenodo.org/record/16534138/files/data_table.zip?download=1)
+# into ./data.
 
-# Option 1: Run with your own data (auto-detects columns interactively)
-python experiments/reproduce_paper.py --data-file data/data_table.csv
 
-# Option 2: Quick test with limited records (faster for testing)
+# Option 1: Quick test with limited records (faster for testing)
 python experiments/reproduce_paper.py \
   --data-file data/data_table.csv \
   --max-records 100 \
   --yes
+  
+
+# Option 2: Run with the entire dataset (auto-detects columns interactively). This takes longer depending on your machine.
+python experiments/reproduce_paper.py --data-file data/data_table.csv
+
+
 
 # Option 3: Run with specific column names (non-interactive)
 python experiments/reproduce_paper.py \
