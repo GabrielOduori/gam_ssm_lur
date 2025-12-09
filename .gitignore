@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+UNCERTAINTY_PLOT_UPDATE
+VISUALIZATION_*
+UNCERTAINTY_PLOT_UPDATE*
+
+
 profile.out
 data/
 outputs/*

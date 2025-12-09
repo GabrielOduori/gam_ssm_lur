@@ -511,37 +511,80 @@ class HybridGAMSSM:
         residuals = y_true - y_pred
         rmse = np.sqrt(np.mean(residuals**2))
         mae = np.mean(np.abs(residuals))
-        
+        mbe = np.mean(residuals)  # Mean Bias Error (positive = under-prediction)
+
         ss_res = np.sum(residuals**2)
         ss_tot = np.sum((y_true - np.mean(y_true))**2)
         r2 = 1 - ss_res / ss_tot
-        
+
         corr = np.corrcoef(y_true, y_pred)[0, 1]
-        
+
         metrics = {
             'rmse': rmse,
             'mae': mae,
+            'mbe': mbe,
             'r2': r2,
             'correlation': corr,
         }
         
-        # Coverage if intervals provided
+        # Coverage and calibration metrics if intervals provided
         if y_lower is not None and y_upper is not None:
+            from scipy import stats
+
             y_lower = np.asarray(y_lower).flatten()
             y_upper = np.asarray(y_upper).flatten()
-            coverage = np.mean((y_true >= y_lower) & (y_true <= y_upper))
+
+            # 95% coverage
+            coverage_95 = np.mean((y_true >= y_lower) & (y_true <= y_upper))
             interval_width = np.mean(y_upper - y_lower)
-            metrics['coverage_95'] = coverage
+            metrics['coverage_95'] = coverage_95
             metrics['interval_width'] = interval_width
+
+            # 90% coverage
+            y_std = (y_upper - y_lower) / (2 * 1.96)  # Reconstruct std from 95% interval
+            z_90 = stats.norm.ppf(0.95)  # 90% = 0.90, so (1 + 0.90) / 2 = 0.95
+            lower_90 = y_pred - z_90 * y_std
+            upper_90 = y_pred + z_90 * y_std
+            coverage_90 = np.mean((y_true >= lower_90) & (y_true <= upper_90))
+            metrics['coverage_90'] = coverage_90
+
+            # CRPS (Continuous Ranked Probability Score)
+            z = (y_true - y_pred) / y_std
+            crps = np.mean(
+                y_std * (z * (2 * stats.norm.cdf(z) - 1) +
+                        2 * stats.norm.pdf(z) - 1 / np.sqrt(np.pi))
+            )
+            metrics['crps'] = crps
         else:
             # Compute from predictions
+            from scipy import stats
+
             predictions = self.predict()
             y_lower = predictions.lower.flatten()
             y_upper = predictions.upper.flatten()
             y_true_full = self._y_matrix.flatten()
-            coverage = np.mean((y_true_full >= y_lower) & (y_true_full <= y_upper))
-            metrics['coverage_95'] = coverage
-            
+            y_pred_full = predictions.total.flatten()
+
+            # 95% coverage
+            coverage_95 = np.mean((y_true_full >= y_lower) & (y_true_full <= y_upper))
+            metrics['coverage_95'] = coverage_95
+
+            # 90% coverage
+            y_std = (y_upper - y_lower) / (2 * 1.96)
+            z_90 = stats.norm.ppf(0.95)
+            lower_90 = y_pred_full - z_90 * y_std
+            upper_90 = y_pred_full + z_90 * y_std
+            coverage_90 = np.mean((y_true_full >= lower_90) & (y_true_full <= upper_90))
+            metrics['coverage_90'] = coverage_90
+
+            # CRPS
+            z = (y_true_full - y_pred_full) / y_std
+            crps = np.mean(
+                y_std * (z * (2 * stats.norm.cdf(z) - 1) +
+                        2 * stats.norm.pdf(z) - 1 / np.sqrt(np.pi))
+            )
+            metrics['crps'] = crps
+
         return metrics
         
     def summary(self) -> HybridSummary:

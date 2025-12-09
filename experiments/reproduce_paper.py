@@ -370,13 +370,30 @@ def _clean_merged_dataframe(
             if series.notna().any():
                 selected_target = cand
                 break
+
+    # If no valid values found, check if column exists and warn instead of failing
     if selected_target is None:
         available = [c for c in df.columns if "epa" in c.lower()]
-        raise ValueError(
-            f"No EPA target column with valid values found. Tried: {epa_candidates}. "
-            f"Available EPA-like columns: {available or 'none'}. "
-            "Specify the correct column with --target-col."
-        )
+        # Check if target column exists but has no valid values in the loaded subset
+        if target_col in df.columns:
+            warning_msg = (
+                f"\n{'*'*70}\n"
+                f"WARNING: Target column '{target_col}' has no valid values\n"
+                f"{'*'*70}\n"
+                f"Rows loaded: {len(df):,}\n"
+                f"This may occur when using --max-records with a small sample size.\n"
+                f"The model will attempt spatial/temporal imputation to fill EPA values.\n"
+                f"If this fails, you'll need to increase --max-records or use the full dataset.\n"
+                f"{'*'*70}\n"
+            )
+            logger.warning(warning_msg)
+            selected_target = target_col
+        else:
+            raise ValueError(
+                f"No EPA target column with valid values found. Tried: {epa_candidates}. "
+                f"Available EPA-like columns: {available or 'none'}. "
+                "Specify the correct column with --target-col."
+            )
     if selected_target != target_col:
         logger.warning(
             f"Switching target column from '{target_col}' to '{selected_target}' "
@@ -414,10 +431,28 @@ def _clean_merged_dataframe(
     # Fill any remaining gaps with global median; if none, fail fast
     median_target = df[target_col].median()
     if pd.isna(median_target):
-        raise ValueError(
-            f"Target column '{target_col}' has no valid values even after interpolation. "
-            "Please verify the EPA data column or specify --target-col explicitly."
+        error_msg = (
+            f"\n{'='*70}\n"
+            f"ERROR: No valid EPA measurements found in loaded data\n"
+            f"{'='*70}\n"
+            f"Target column: '{target_col}'\n"
+            f"Rows loaded:   {len(df):,}\n"
+            f"\n"
+            f"The problem:\n"
+            f"  - EPA measurements don't appear until around row 15,158\n"
+            f"  - You loaded only {len(df):,} rows, which contain no EPA data\n"
+            f"  - Without EPA values, the model cannot be trained\n"
+            f"\n"
+            f"Solutions:\n"
+            f"  1. Increase --max-records to at least 20,000:\n"
+            f"     python experiments/reproduce_paper.py --max-records 20000 --yes\n"
+            f"\n"
+            f"  2. Use the full dataset (recommended for actual experiments):\n"
+            f"     python experiments/reproduce_paper.py --yes\n"
+            f"{'='*70}\n"
         )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     df[target_col] = df[target_col].fillna(median_target)
 
     df = df.dropna(subset=[target_col])
@@ -510,21 +545,11 @@ def load_data(
                 feature_prefixes=BASE_FEATURE_PREFIXES,
             )
 
-        try:
-            if max_records:
-                logger.info(f"Loading only first {max_records} records for testing")
-                df, feature_cols, target_col = _load_and_clean(max_records)
-            else:
-                df, feature_cols, target_col = _load_and_clean(None)
-        except ValueError as exc:
-            if max_records:
-                logger.warning(
-                    "Insufficient valid EPA target values in the first "
-                    f"{max_records} rows. Retrying with full dataset."
-                )
-                df, feature_cols, target_col = _load_and_clean(None)
-            else:
-                raise
+        if max_records:
+            logger.info(f"Loading only first {max_records} records for testing")
+            df, feature_cols, target_col = _load_and_clean(max_records)
+        else:
+            df, feature_cols, target_col = _load_and_clean(None)
 
         # Normalize column names for downstream code
         # df = df.head(100)
@@ -578,6 +603,7 @@ def fit_baseline_gam(X: np.ndarray, y: np.ndarray, feature_names: list) -> dict:
 
     rmse = np.sqrt(np.mean((y - y_pred) ** 2))
     mae = np.mean(np.abs(y - y_pred))
+    mbe = np.mean(y - y_pred)  # Mean Bias Error (positive = under-prediction)
     ss_res = np.sum((y - y_pred) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     r2 = 1 - ss_res / ss_tot
@@ -588,6 +614,7 @@ def fit_baseline_gam(X: np.ndarray, y: np.ndarray, feature_names: list) -> dict:
         "predictions": y_pred,
         "rmse": rmse,
         "mae": mae,
+        "mbe": mbe,
         "r2": r2,
         "correlation": corr,
     }
@@ -643,29 +670,58 @@ def create_comparison_table(
 ) -> pd.DataFrame:
     """Create Table 2: Model comparison (GAM-only vs GAM-SSM)."""
 
+    # Helper function to calculate improvement
+    def calc_improvement(baseline_val, hybrid_val, lower_is_better=True):
+        if lower_is_better:
+            improvement = (baseline_val - hybrid_val) / baseline_val * 100
+        else:
+            improvement = (hybrid_val - baseline_val) / baseline_val * 100
+        return f"{improvement:.1f}%"
+
     table = pd.DataFrame(
         {
-            "Metric": ["RMSE (µg/m³)", "MAE (µg/m³)", "R²", "Correlation"],
-            "GAM-only": [
+            "Metric": [
+                "RMSE (µg/m³)",
+                "MAE (µg/m³)",
+                "MBE (µg/m³)",
+                "R²",
+                "Pearson r",
+                "CRPS (µg/m³)",
+                "Coverage (90%)",
+                "Coverage (95%)"
+            ],
+            "GAM-LUR": [
                 f"{baseline['rmse']:.3f}",
                 f"{baseline['mae']:.3f}",
+                f"{baseline['mbe']:.3f}",
                 f"{baseline['r2']:.3f}",
                 f"{baseline['correlation']:.3f}",
+                "—",  # No uncertainty estimates for GAM-LUR
+                "—",
+                "—"
             ],
             "GAM-SSM": [
                 f"{hybrid['metrics']['rmse']:.3f}",
                 f"{hybrid['metrics']['mae']:.3f}",
+                f"{hybrid['metrics']['mbe']:.3f}",
                 f"{hybrid['metrics']['r2']:.3f}",
                 f"{hybrid['metrics']['correlation']:.3f}",
+                f"{hybrid['metrics'].get('crps', 0.0):.3f}",
+                f"{hybrid['metrics'].get('coverage_90', 0.0):.3f}",
+                f"{hybrid['metrics']['coverage_95']:.3f}"
             ],
+            "Improvement": [
+                calc_improvement(baseline['rmse'], hybrid['metrics']['rmse'], True),
+                calc_improvement(baseline['mae'], hybrid['metrics']['mae'], True),
+                calc_improvement(abs(baseline['mbe']), abs(hybrid['metrics']['mbe']), True),
+                calc_improvement(baseline['r2'], hybrid['metrics']['r2'], False),
+                calc_improvement(baseline['correlation'], hybrid['metrics']['correlation'], False),
+                "—",
+                "—",
+                "—"
+            ]
         }
     )
-
-    # Calculate improvement
-    rmse_improvement = (
-        (baseline["rmse"] - hybrid["metrics"]["rmse"]) / baseline["rmse"] * 100
-    )
-    table["Improvement"] = [f"{rmse_improvement:.1f}%", "", "", ""]
 
     table.to_csv(output_path, index=False)
     logger.info(f"Saved comparison table to {output_path}")
@@ -673,43 +729,178 @@ def create_comparison_table(
     return table
 
 
+def save_metrics_as_latex(baseline: dict, hybrid: dict, output_path: Path) -> None:
+    """Export model performance metrics as LaTeX table for publication.
+
+    Args:
+        baseline: Dictionary with baseline GAM-LUR metrics (rmse, mae, mbe, r2, correlation)
+        hybrid: Dictionary with hybrid GAM-SSM results (contains 'metrics' subdictionary)
+        output_path: Path where LaTeX table will be saved (.tex file)
+
+    Note:
+        Table compares GAM-LUR (baseline) vs GAM-SSM (hybrid model).
+    """
+    # Build rows with numeric values and improvements
+    rows = []
+    metrics_config = [
+        ("rmse", "RMSE (µg/m³)", True),  # True = lower is better
+        ("mae", "MAE (µg/m³)", True),
+        ("mbe", "MBE (µg/m³)", True, True),  # Fourth param = use absolute value for improvement
+        ("r2", "R²", False),     # False = higher is better
+        ("correlation", "Pearson r", False),
+        ("crps", "CRPS (µg/m³)", True, False, True),  # Fifth param = GAM-SSM only
+        ("coverage_90", "Coverage (90\\%)", False, False, True),
+        ("coverage_95", "Coverage (95\\%)", False, False, True)
+    ]
+
+    for metric_info in metrics_config:
+        metric_key = metric_info[0]
+        metric_label = metric_info[1]
+        lower_is_better = metric_info[2]
+        use_abs_for_improvement = metric_info[3] if len(metric_info) > 3 else False
+        gam_ssm_only = metric_info[4] if len(metric_info) > 4 else False
+
+        try:
+            # Get values
+            if gam_ssm_only:
+                gam_val = None  # No value for GAM-only
+                hybrid_val = hybrid['metrics'][metric_key]
+            else:
+                gam_val = baseline[metric_key]
+                hybrid_val = hybrid['metrics'][metric_key]
+
+            # Calculate improvement (positive % means hybrid is better)
+            if gam_val is not None:
+                if use_abs_for_improvement:
+                    # For MBE, use absolute values (smaller absolute bias is better)
+                    improvement = (abs(gam_val) - abs(hybrid_val)) / abs(gam_val) * 100
+                elif lower_is_better:
+                    improvement = (gam_val - hybrid_val) / gam_val * 100
+                else:
+                    improvement = (hybrid_val - gam_val) / gam_val * 100
+            else:
+                improvement = None  # No improvement for GAM-SSM only metrics
+
+            rows.append({
+                "Metric": metric_label,
+                "GAM-LUR": gam_val if gam_val is not None else "—",
+                "GAM-SSM": hybrid_val,
+                "Improvement (%)": improvement if improvement is not None else "—"
+            })
+        except KeyError as e:
+            logger.warning(f"Missing metric {metric_key}: {e}")
+
+    df = pd.DataFrame(rows)
+
+    # Custom formatting function for mixed numeric and string data
+    def format_value(val):
+        if val == "—":
+            return "—"
+        elif isinstance(val, (int, float)):
+            return f"{val:.3f}"
+        else:
+            return str(val)
+
+    # Generate LaTeX table manually for better control
+    latex_lines = [
+        "\\begin{table}",
+        "\\caption{Model Performance Comparison: GAM-LUR vs GAM-SSM}",
+        "\\label{tab:model_performance}",
+        "\\begin{tabular}{lrrr}",
+        "\\toprule",
+        "Metric & GAM-LUR & GAM-SSM & Improvement (\\%) \\\\",
+        "\\midrule"
+    ]
+
+    for _, row in df.iterrows():
+        metric = row["Metric"]
+        gam = format_value(row["GAM-LUR"])
+        hybrid = format_value(row["GAM-SSM"])
+        improvement = format_value(row["Improvement (%)"])
+        latex_lines.append(f"{metric} & {gam} & {hybrid} & {improvement} \\\\")
+
+    latex_lines.extend([
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}"
+    ])
+
+    latex_table = "\n".join(latex_lines)
+
+    # Write to file
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(latex_table)
+
+    logger.info(f"Saved LaTeX performance table to {output_path}")
+
+
 def create_convergence_plot(hybrid_result: dict, output_path: Path):
-    """Create Figure 6: EM convergence diagnostics."""
+    """Create Figure 6: EM convergence diagnostics with enhanced styling from visualization_suite."""
 
     model = hybrid_result["model"]
     em_history = model.get_em_convergence()
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-    # Log-likelihood
+    iterations = em_history["iteration"]
+
+    # Log-likelihood convergence (enhanced styling)
     ax = axes[0, 0]
-    ax.plot(em_history["iteration"], em_history["log_likelihood"], "b-o", markersize=4)
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("Log-likelihood")
-    ax.set_title("(a) Log-likelihood")
+    ax.plot(
+        iterations,
+        em_history["log_likelihood"],
+        "bo-",
+        linewidth=2,
+        markersize=8
+    )
+    ax.set_xlabel("EM Iteration", fontsize=10)
+    ax.set_ylabel("Log-Likelihood", fontsize=10)
+    ax.set_title("Log-Likelihood Convergence", fontsize=11, fontweight='bold')
     ax.grid(True, alpha=0.3)
 
-    # Parameter traces
+    # Parameter traces (enhanced colors from visualization_suite)
     ax = axes[0, 1]
-    ax.plot(em_history["iteration"], em_history["tr_T"], "b-", label="tr(T)")
-    ax.plot(em_history["iteration"], em_history["tr_Q"], "r-", label="tr(Q)")
-    ax.plot(em_history["iteration"], em_history["tr_H"], "g-", label="tr(H)")
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("Parameter trace")
-    ax.set_title("(b) Parameter traces")
-    ax.legend()
+    ax.plot(
+        iterations,
+        em_history["tr_T"],
+        "ro-",
+        label="tr(T)",
+        linewidth=2,
+        markersize=6
+    )
+    ax.plot(
+        iterations,
+        em_history["tr_Q"],
+        "go-",
+        label="tr(Q)",
+        linewidth=2,
+        markersize=6
+    )
+    ax.plot(
+        iterations,
+        em_history["tr_H"],
+        "bo-",
+        label="tr(H)",
+        linewidth=2,
+        markersize=6
+    )
+    ax.set_xlabel("EM Iteration", fontsize=10)
+    ax.set_ylabel("Parameter Trace", fontsize=10)
+    ax.set_title("Parameter Evolution", fontsize=11, fontweight='bold')
+    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
-    # Log-likelihood increment
+    # Log-likelihood differences (semilogy for convergence rate)
     ax = axes[1, 0]
     ll = em_history["log_likelihood"].values
     ll_change = np.abs(np.diff(ll))
-    ax.semilogy(range(1, len(ll)), ll_change, "b-o", markersize=4)
-    ax.axhline(y=1e-6, color="r", linestyle="--", label="Convergence threshold")
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("|ΔLL|")
-    ax.set_title("(c) Log-likelihood increment")
-    ax.legend()
+    ax.semilogy(range(1, len(ll)), ll_change, "mo-", linewidth=2, markersize=6)
+    ax.axhline(y=1e-6, color="r", linestyle="--", linewidth=2, label="Convergence threshold")
+    ax.set_xlabel("EM Iteration", fontsize=10)
+    ax.set_ylabel("|ΔLog-Likelihood|", fontsize=10)
+    ax.set_title("Convergence Rate", fontsize=11, fontweight='bold')
+    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # Final diagnostics text
@@ -745,7 +936,7 @@ def create_convergence_plot(hybrid_result: dict, output_path: Path):
 
 
 def create_residual_diagnostics(hybrid_result: dict, output_path: Path):
-    """Create Figure 8: Residual diagnostics."""
+    """Create Figure 8: Residual diagnostics with enhanced styling from visualization_suite."""
     from scipy import stats
 
     model = hybrid_result["model"]
@@ -755,85 +946,330 @@ def create_residual_diagnostics(hybrid_result: dict, output_path: Path):
     y_pred = predictions.total.flatten()
     residuals = y_true - y_pred
 
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
-    # Residuals vs fitted
+    # Residuals vs fitted (enhanced with better visibility)
     ax = axes[0, 0]
-    ax.scatter(y_pred, residuals, alpha=0.1, s=1)
-    ax.axhline(y=0, color="r", linestyle="--")
-    ax.set_xlabel("Fitted values")
-    ax.set_ylabel("Residuals")
-    ax.set_title("(a) Residuals vs Fitted")
+    ax.scatter(y_pred, residuals, alpha=0.5, s=1, color='#3498db')
+    ax.axhline(y=0, color="red", linestyle="--", linewidth=2)
+    ax.set_xlabel("Fitted Values", fontsize=10)
+    ax.set_ylabel("Residuals", fontsize=10)
+    ax.set_title("Residuals vs Fitted", fontsize=11, fontweight='bold')
+    ax.grid(True, alpha=0.3)
 
-    # Q-Q plot
+    # Q-Q plot (with enhanced grid)
     ax = axes[0, 1]
     stats.probplot(residuals, dist="norm", plot=ax)
-    ax.set_title("(b) Q-Q Plot")
+    ax.set_title("Q-Q Plot (Normality Check)", fontsize=11, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    # Customize the Q-Q plot styling
+    ax.get_lines()[0].set_markerfacecolor('#3498db')
+    ax.get_lines()[0].set_markeredgecolor('#2c3e50')
+    ax.get_lines()[0].set_markersize(3)
+    ax.get_lines()[1].set_color('red')
+    ax.get_lines()[1].set_linewidth(2)
 
-    # Histogram
+    # Histogram with normal overlay (enhanced styling)
     ax = axes[0, 2]
-    ax.hist(residuals, bins=50, density=True, alpha=0.7, edgecolor="black")
+    ax.hist(
+        residuals,
+        bins=50,
+        density=True,
+        alpha=0.7,
+        edgecolor="black",
+        color='#3498db'
+    )
     x = np.linspace(residuals.min(), residuals.max(), 100)
-    ax.plot(x, stats.norm.pdf(x, residuals.mean(), residuals.std()), "r-", lw=2)
-    ax.set_xlabel("Residuals")
-    ax.set_ylabel("Density")
-    ax.set_title("(c) Residual Distribution")
+    ax.plot(
+        x,
+        stats.norm.pdf(x, residuals.mean(), residuals.std()),
+        "r-",
+        lw=2,
+        label="Normal"
+    )
+    ax.set_xlabel("Residuals", fontsize=10)
+    ax.set_ylabel("Density", fontsize=10)
+    ax.set_title("Residual Distribution", fontsize=11, fontweight='bold')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    # Temporal residual pattern
+    # Temporal residual pattern (enhanced with better colors)
     ax = axes[1, 0]
     residual_matrix = residuals.reshape(model.n_times_, model.n_locations_)
     daily_mean = residual_matrix.mean(axis=1)
     daily_std = residual_matrix.std(axis=1)
     t = np.arange(len(daily_mean))
-    ax.plot(t, daily_mean, "b-", lw=1)
-    ax.fill_between(t, daily_mean - daily_std, daily_mean + daily_std, alpha=0.3)
-    ax.axhline(y=0, color="r", linestyle="--")
-    ax.set_xlabel("Time step")
-    ax.set_ylabel("Mean residual")
-    ax.set_title("(d) Temporal Residual Pattern")
+    ax.plot(t, daily_mean, "b-", lw=2, label="Mean", color='#3498db')
+    ax.fill_between(
+        t,
+        daily_mean - daily_std,
+        daily_mean + daily_std,
+        alpha=0.3,
+        label="±1 SD",
+        color='#3498db'
+    )
+    ax.axhline(y=0, color="red", linestyle="--", linewidth=2)
+    ax.set_xlabel("Time", fontsize=10)
+    ax.set_ylabel("Residual", fontsize=10)
+    ax.set_title("Temporal Residual Pattern", fontsize=11, fontweight='bold')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    # Spatial residual pattern
+    # Spatial residual pattern (enhanced histogram)
     ax = axes[1, 1]
     spatial_rmse = np.sqrt((residual_matrix**2).mean(axis=0))
-    ax.hist(spatial_rmse, bins=30, edgecolor="black", alpha=0.7)
+    ax.hist(spatial_rmse, bins=30, edgecolor="black", alpha=0.7, color='#3498db')
     ax.axvline(
         x=spatial_rmse.mean(),
-        color="r",
+        color="red",
         linestyle="--",
+        linewidth=2,
         label=f"Mean: {spatial_rmse.mean():.3f}",
     )
-    ax.set_xlabel("Location RMSE")
-    ax.set_ylabel("Frequency")
-    ax.set_title("(e) Spatial RMSE Distribution")
-    ax.legend()
+    ax.set_xlabel("Location RMSE", fontsize=10)
+    ax.set_ylabel("Frequency", fontsize=10)
+    ax.set_title("Spatial RMSE Distribution", fontsize=11, fontweight='bold')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    # ACF of residuals
+    # ACF of residuals (enhanced styling)
     ax = axes[1, 2]
     # Use mean residuals across space
     try:
         from statsmodels.graphics.tsaplots import plot_acf
 
-        plot_acf(daily_mean, lags=30, ax=ax, alpha=0.05)
-        ax.set_title("(f) Residual ACF")
+        plot_acf(daily_mean, lags=50, ax=ax, alpha=0.05, color='#3498db')
+        ax.set_title("Residual Autocorrelation", fontsize=11, fontweight='bold')
+        ax.set_xlabel("Lag", fontsize=10)
+        ax.set_ylabel("Autocorrelation", fontsize=10)
+        ax.grid(True, alpha=0.3)
     except Exception:
-        # Fallback if statsmodels is unavailable
-        nlags = 30
-        acf = np.correlate(
-            daily_mean - daily_mean.mean(), daily_mean - daily_mean.mean(), mode="full"
+        # Fallback if statsmodels is unavailable (with enhanced styling)
+        nlags = min(50, len(daily_mean) // 2)
+        autocorr = np.correlate(
+            daily_mean - daily_mean.mean(),
+            daily_mean - daily_mean.mean(),
+            mode="full"
         )
-        acf = acf[len(acf) // 2 :]
-        acf = acf[: nlags + 1] / acf[0]
-        ax.bar(range(nlags + 1), acf, width=0.3, color="blue", alpha=0.7)
-        ax.axhline(y=0, color="black")
-        ax.axhline(y=1.96 / np.sqrt(len(daily_mean)), color="r", linestyle="--")
-        ax.axhline(y=-1.96 / np.sqrt(len(daily_mean)), color="r", linestyle="--")
-        ax.set_xlabel("Lag")
-        ax.set_ylabel("ACF")
-        ax.set_title("(f) Residual ACF")
+        autocorr = autocorr[len(autocorr) // 2 :]
+        autocorr = autocorr[: nlags + 1] / autocorr[0]
+        lags = np.arange(len(autocorr))
+
+        ax.plot(lags, autocorr, "b-", linewidth=2, color='#3498db')
+        ax.axhline(y=0, color="red", linestyle="--", linewidth=2)
+        ax.axhline(
+            y=1.96 / np.sqrt(len(daily_mean)),
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            alpha=0.5
+        )
+        ax.axhline(
+            y=-1.96 / np.sqrt(len(daily_mean)),
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            alpha=0.5
+        )
+        ax.set_xlabel("Lag", fontsize=10)
+        ax.set_ylabel("Autocorrelation", fontsize=10)
+        ax.set_title("Residual Autocorrelation", fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     logger.info(f"Saved residual diagnostics to {output_path}")
+    plt.close()
+
+
+def plot_temporal_evolution(
+    hybrid_result: dict,
+    output_path: Path,
+    selected_locations: list[int] = None,
+    time_labels=None
+) -> None:
+    """Plot temporal evolution for selected locations (from visualization_suite.py).
+
+    Shows observed vs smoothed data with 95% confidence intervals in a 2x3 grid.
+    """
+    model = hybrid_result["model"]
+    predictions = hybrid_result["predictions"]
+
+    # Select locations
+    if selected_locations is None:
+        n_locs = min(6, model.n_locations_)
+        selected_locations = np.linspace(0, model.n_locations_ - 1, n_locs, dtype=int)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    axes = axes.flatten()
+
+    timesteps = np.arange(model.n_times_)
+    observed = model._y_matrix
+    smoothed = predictions.total
+    lower = predictions.lower
+    upper = predictions.upper
+
+    # Setup x-axis
+    x_vals = timesteps
+    x_label = "Time step"
+    if time_labels is not None and len(time_labels) == model.n_times_:
+        x_vals = time_labels
+        try:
+            x_vals = pd.to_datetime(x_vals)
+            x_label = "Date"
+        except Exception:
+            x_label = "Time"
+
+    for i, loc in enumerate(selected_locations):
+        if i >= len(axes):
+            break
+
+        ax = axes[i]
+
+        # Plot uncertainty band
+        ax.fill_between(
+            x_vals,
+            lower[:, loc],
+            upper[:, loc],
+            alpha=0.2,
+            color='#3498db',
+            label="95% CI",
+            zorder=1
+        )
+
+        # Plot observed vs smoothed
+        ax.plot(
+            x_vals,
+            observed[:, loc],
+            'o',
+            alpha=0.6,
+            label="Observed",
+            markersize=2.5,
+            linewidth=1,
+            color='#2c3e50',
+            zorder=3
+        )
+        ax.plot(
+            x_vals,
+            smoothed[:, loc],
+            '-',
+            label="Predicted",
+            linewidth=1.5,
+            color='#3498db',
+            zorder=2
+        )
+
+        ax.set_title(f"Location {loc}", fontsize=10, fontweight='bold')
+        ax.set_xlabel(x_label, fontsize=9)
+        ax.set_ylabel("NO₂ (µg/m³)", fontsize=9)
+        ax.legend(fontsize=7, framealpha=0.9)
+        ax.grid(True, alpha=0.3, linestyle='--')
+
+        # Rotate x-axis labels if dates
+        if isinstance(x_vals, pd.DatetimeIndex):
+            ax.tick_params(axis='x', rotation=45)
+
+    # Hide empty subplots
+    for i in range(len(selected_locations), len(axes)):
+        axes[i].axis('off')
+
+    fig.suptitle(
+        "Temporal Evolution: Observed vs Predicted with Uncertainty",
+        fontsize=13,
+        fontweight='bold',
+        y=0.98
+    )
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    logger.info(f"Saved temporal evolution plot to {output_path}")
+    plt.close()
+
+
+def plot_spatial_patterns(
+    hybrid_result: dict,
+    output_path: Path,
+    timesteps: list[int] = None,
+    observations_df: pd.DataFrame = None
+) -> None:
+    """Plot spatial patterns at selected timesteps (from visualization_suite.py).
+
+    Shows observed vs smoothed spatial distributions in a 2-row grid.
+    """
+    model = hybrid_result["model"]
+    predictions = hybrid_result["predictions"]
+
+    # Get coordinates
+    if observations_df is not None:
+        coords_df = observations_df[["location_id", "lat", "lon"]].drop_duplicates()
+        coords_df = coords_df[coords_df["location_id"].isin(model.location_ids_)]
+        coords_df = coords_df.set_index("location_id").loc[model.location_ids_]
+        coords = coords_df[["lon", "lat"]].values
+    else:
+        # Fallback: use location indices as coordinates
+        coords = np.column_stack([np.arange(model.n_locations_),
+                                  np.arange(model.n_locations_)])
+
+    # Select timesteps
+    if timesteps is None:
+        timesteps = [
+            0,
+            model.n_times_ // 4,
+            model.n_times_ // 2,
+            model.n_times_ - 1,
+        ]
+
+    n_times = len(timesteps)
+    fig, axes = plt.subplots(2, n_times, figsize=(4 * n_times, 8))
+
+    observed = model._y_matrix
+    smoothed = predictions.total
+
+    for i, day in enumerate(timesteps):
+        # Observed data
+        ax = axes[0, i]
+        scatter1 = ax.scatter(
+            coords[:, 0],
+            coords[:, 1],
+            c=observed[day],
+            cmap="viridis",
+            s=50,
+            alpha=0.7,
+            vmin=np.nanmin(observed),
+            vmax=np.nanmax(observed)
+        )
+        ax.set_title(f"Observed (Timestep {day})", fontsize=10, fontweight='bold')
+        ax.set_xlabel("Longitude", fontsize=9)
+        ax.set_ylabel("Latitude", fontsize=9)
+        plt.colorbar(scatter1, ax=ax, shrink=0.8, label="NO₂ (µg/m³)")
+        ax.grid(True, alpha=0.3)
+
+        # Smoothed data
+        ax = axes[1, i]
+        scatter2 = ax.scatter(
+            coords[:, 0],
+            coords[:, 1],
+            c=smoothed[day],
+            cmap="viridis",
+            s=50,
+            alpha=0.7,
+            vmin=np.nanmin(smoothed),
+            vmax=np.nanmax(smoothed)
+        )
+        ax.set_title(f"Predicted (Timestep {day})", fontsize=10, fontweight='bold')
+        ax.set_xlabel("Longitude", fontsize=9)
+        ax.set_ylabel("Latitude", fontsize=9)
+        plt.colorbar(scatter2, ax=ax, shrink=0.8, label="NO₂ (µg/m³)")
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(
+        "Spatial Patterns: Observed vs Predicted",
+        fontsize=13,
+        fontweight='bold',
+        y=0.98
+    )
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    logger.info(f"Saved spatial patterns plot to {output_path}")
     plt.close()
 
 
@@ -1284,6 +1720,12 @@ Examples:
         action="store_true",
         help="Skip gridded/temporal map outputs (Figures 15-18)",
     )
+    parser.add_argument(
+        "--uncertainty-locations",
+        type=str,
+        default=None,
+        help="Comma-separated location IDs for uncertainty plot (e.g., '0,5,10,15'). Default: auto-select 4 diverse locations",
+    )
     args = parser.parse_args()
 
     # Ensure data is available (download from Zenodo if missing)
@@ -1440,12 +1882,17 @@ Examples:
     logger.info("Creating Outputs")
     logger.info("=" * 70)
 
-    # Table 2
+    # Table 2: CSV format
     table = create_comparison_table(
         baseline, hybrid, paths["tables_dir"] / "table2_model_comparison.csv"
     )
     print("\nTable 2: Model Comparison")
     print(table.to_string(index=False))
+
+    # Table 2: LaTeX format for publication
+    save_metrics_as_latex(
+        baseline, hybrid, paths["tables_dir"] / "table2_model_comparison.tex"
+    )
 
     # Figure 6: Convergence
     create_convergence_plot(hybrid, paths["figures_dir"] / "fig6_convergence.png")
@@ -1460,11 +1907,26 @@ Examples:
         hybrid, paths["figures_dir"] / "fig8_residual_diagnostics.png"
     )
 
-    # Figure 9: Prediction intervals for one location (uncertainty)
-    def plot_uncertainty_for_location(
-        model, predictions, output_path: Path, loc_id: int = 0, time_labels=None
+    # Figure 9: Prediction intervals for multiple locations (uncertainty)
+    def plot_uncertainty_for_locations(
+        model, predictions, output_path: Path, loc_ids: list[int] = None, time_labels=None
     ):
-        """Plot observed/predicted with uncertainty bands for a single location."""
+        """Plot observed/predicted with uncertainty bands for multiple locations in a 2x2 grid."""
+        # Default to first 4 locations if not specified
+        if loc_ids is None:
+            loc_ids = list(range(min(4, model.n_locations_)))
+
+        # Ensure we have exactly 4 locations for 2x2 grid
+        if len(loc_ids) > 4:
+            loc_ids = loc_ids[:4]
+            logger.warning(f"Only plotting first 4 locations from provided list: {loc_ids}")
+        elif len(loc_ids) < 4:
+            # Pad with additional locations if needed
+            available_locs = list(range(model.n_locations_))
+            for loc in available_locs:
+                if loc not in loc_ids and len(loc_ids) < 4:
+                    loc_ids.append(loc)
+
         t_range = np.arange(model.n_times_)
         x_vals = t_range
         x_label = "Time step"
@@ -1476,34 +1938,136 @@ Examples:
                 x_label = "Date"
             except Exception:
                 x_label = "Time"
-        plt.figure(figsize=(8, 4))
-        plt.fill_between(
-            x_vals,
-            predictions.lower[:, loc_id],
-            predictions.upper[:, loc_id],
-            alpha=0.3,
-            color="blue",
-            label=f"{int(model.confidence_level * 100)}% CI",
+
+        # Create 2x2 subplot layout
+        fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+        axes = axes.flatten()
+
+        # Define colors for better aesthetics
+        colors = {
+            'observed': '#2c3e50',      # Dark gray-blue
+            'predicted': '#3498db',      # Bright blue
+            'ci_fill': '#3498db',        # Same blue for CI
+            'grid': '#bdc3c7'            # Light gray
+        }
+
+        for idx, loc_id in enumerate(loc_ids):
+            ax = axes[idx]
+
+            # Calculate statistics for this location
+            obs_loc = model._y_matrix[:, loc_id]
+            pred_loc = predictions.total[:, loc_id]
+            mean_obs = np.nanmean(obs_loc)
+            rmse_loc = np.sqrt(np.nanmean((obs_loc - pred_loc) ** 2))
+
+            # Plot uncertainty band first (so it's behind)
+            ax.fill_between(
+                x_vals,
+                predictions.lower[:, loc_id],
+                predictions.upper[:, loc_id],
+                alpha=0.2,
+                color=colors['ci_fill'],
+                label=f"{int(model.confidence_level * 100)}% CI",
+                zorder=1
+            )
+
+            # Plot observed values
+            ax.plot(
+                x_vals,
+                obs_loc,
+                'o',
+                color=colors['observed'],
+                markersize=2.5,
+                alpha=0.6,
+                label="Observed",
+                zorder=3
+            )
+
+            # Plot predicted values
+            ax.plot(
+                x_vals,
+                pred_loc,
+                '-',
+                color=colors['predicted'],
+                lw=1.5,
+                label="Predicted",
+                zorder=2
+            )
+
+            ax.set_xlabel(x_label, fontsize=10)
+            ax.set_ylabel("NO₂ (µg/m³)", fontsize=10)
+            ax.set_title(
+                f"Location {loc_id}\nMean: {mean_obs:.1f} µg/m³ | RMSE: {rmse_loc:.2f}",
+                fontsize=10,
+                pad=10
+            )
+            ax.legend(loc='best', fontsize=7, framealpha=0.9)
+            ax.grid(True, alpha=0.25, linestyle='--', color=colors['grid'], linewidth=0.5)
+
+            # Rotate x-axis labels if dates
+            if isinstance(x_vals, pd.DatetimeIndex):
+                ax.tick_params(axis='x', rotation=45)
+
+        # Calculate overall statistics for subtitle
+        overall_rmse = np.sqrt(np.nanmean((model._y_matrix - predictions.total) ** 2))
+        overall_r2 = 1 - (np.nansum((model._y_matrix - predictions.total) ** 2) /
+                         np.nansum((model._y_matrix - np.nanmean(model._y_matrix)) ** 2))
+
+        fig.suptitle(
+            f"GAM-SSM Predictions with Uncertainty Intervals\n"
+            f"Overall RMSE: {overall_rmse:.2f} µg/m³ | R²: {overall_r2:.3f}",
+            fontsize=13,
+            fontweight='bold',
+            y=0.98
         )
-        plt.plot(
-            x_vals, model._y_matrix[:, loc_id], "k.", markersize=3, label="Observed"
-        )
-        plt.plot(x_vals, predictions.total[:, loc_id], "b-", lw=1, label="Predicted")
-        plt.xlabel(x_label)
-        plt.ylabel("NO₂ (µg/m³)")
-        plt.title(f"Predictions with Uncertainty (Location {loc_id})")
-        plt.legend()
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.96])  # Make room for suptitle
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close()
-        logger.info(f"Saved uncertainty plot to {output_path}")
+        logger.info(f"Saved uncertainty plot for {len(loc_ids)} locations to {output_path}")
 
-    plot_uncertainty_for_location(
+    # Select locations for uncertainty plot
+    if args.uncertainty_locations:
+        # Use user-specified locations
+        diverse_loc_ids = [int(x.strip()) for x in args.uncertainty_locations.split(',')]
+        logger.info(f"Using user-specified locations for uncertainty plot: {diverse_loc_ids}")
+    else:
+        # Auto-select 4 diverse locations based on mean NO2 levels
+        # This gives us locations with different pollution characteristics
+        mean_no2_per_location = np.nanmean(hybrid["model"]._y_matrix, axis=0)
+        sorted_locs = np.argsort(mean_no2_per_location)
+
+        # Pick locations at 25th, 50th, 75th percentiles and max
+        n_locs = len(sorted_locs)
+        diverse_loc_ids = [
+            sorted_locs[int(n_locs * 0.25)],  # Low pollution
+            sorted_locs[int(n_locs * 0.50)],  # Medium-low pollution
+            sorted_locs[int(n_locs * 0.75)],  # Medium-high pollution
+            sorted_locs[-1],                   # High pollution
+        ]
+        logger.info(f"Auto-selected diverse locations for uncertainty plot: {diverse_loc_ids}")
+
+    plot_uncertainty_for_locations(
         hybrid["model"],
         hybrid["predictions"],
         paths["figures_dir"] / "fig9_uncertainty_timeseries.png",
-        loc_id=0,
+        loc_ids=diverse_loc_ids,
         time_labels=time_labels,
+    )
+
+    # Figure 9b: Temporal Evolution (6 locations with uncertainty)
+    plot_temporal_evolution(
+        hybrid,
+        paths["figures_dir"] / "fig9b_temporal_evolution.png",
+        selected_locations=None,  # Auto-select 6 locations
+        time_labels=time_labels
+    )
+
+    # Figure 9c: Spatial Patterns (observed vs predicted at key timesteps)
+    plot_spatial_patterns(
+        hybrid,
+        paths["figures_dir"] / "fig9c_spatial_patterns.png",
+        timesteps=None,  # Auto-select 4 timesteps
+        observations_df=observations
     )
 
     # Figure 10: Spatial comparison maps (GAM-LUR vs GAM-SSM)
