@@ -428,6 +428,67 @@ class HybridGAMSSM:
             lower=lower,
             upper=upper,
         )
+
+    def predict_in_observation_order(
+        self,
+        time_index: Union[NDArray, pd.Series],
+        location_index: Union[NDArray, pd.Series],
+        X: Optional[Union[NDArray, pd.DataFrame]] = None,
+    ) -> NDArray:
+        """Return predictions aligned to the original observation order.
+
+        This remaps the internal time/location grid back to the provided
+        observation ordering so metrics like R² are computed on correctly
+        paired values.
+
+        Parameters
+        ----------
+        time_index : array-like
+            Time index per observation (same ordering as y provided to fit).
+        location_index : array-like
+            Location index per observation.
+        X : array-like, optional
+            Features for prediction in the same order as time/location. If
+            None, uses the stored training features.
+
+        Returns
+        -------
+        NDArray
+            Predicted values aligned to the observation order.
+        """
+        self._check_fitted()
+
+        if isinstance(time_index, pd.Series):
+            time_index = time_index.values
+        if isinstance(location_index, pd.Series):
+            location_index = location_index.values
+
+        time_index = np.asarray(time_index)
+        location_index = np.asarray(location_index)
+
+        if time_index.shape[0] != location_index.shape[0]:
+            raise ValueError("time_index and location_index must have the same length")
+
+        # Compute full grid predictions (uses training grid if X is None)
+        full_pred = self.predict(X).total  # shape (T, n_locations)
+
+        # Build lookup for grid positions
+        time_map = {t: i for i, t in enumerate(self.time_ids_)}
+        loc_map = {l: j for j, l in enumerate(self.location_ids_)}
+
+        try:
+            aligned = np.array([
+                full_pred[time_map[t], loc_map[l]]
+                for t, l in zip(time_index, location_index)
+            ])
+        except KeyError as exc:
+            missing_key = exc.args[0]
+            raise KeyError(
+                f"Index '{missing_key}' not found in fitted model time/location IDs. "
+                "Ensure the provided indices match those used in fit()."
+            ) from exc
+
+        return aligned
         
     def forecast(
         self,
@@ -586,6 +647,25 @@ class HybridGAMSSM:
             metrics['crps'] = crps
 
         return metrics
+
+    def evaluate_in_observation_order(
+        self,
+        y_true: NDArray,
+        time_index: Union[NDArray, pd.Series],
+        location_index: Union[NDArray, pd.Series],
+        X: Optional[Union[NDArray, pd.DataFrame]] = None,
+    ) -> Dict[str, float]:
+        """Evaluate metrics using predictions aligned to observation order.
+
+        Useful when the input data are not already sorted in the internal
+        (time, location) grid order used by the model.
+        """
+        aligned_pred = self.predict_in_observation_order(
+            time_index=time_index,
+            location_index=location_index,
+            X=X,
+        )
+        return self.evaluate(y_true=y_true, y_pred=aligned_pred)
         
     def summary(self) -> HybridSummary:
         """Get model summary.
