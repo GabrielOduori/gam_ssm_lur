@@ -9,6 +9,19 @@ __pycache__/
 UNCERTAINTY_PLOT_UPDATE
 VISUALIZATION_*
 UNCERTAINTY_PLOT_UPDATE*
+LATEX_TABLE_EXPORT*
+LATEX_TABLE_SUMMARY*
+METRICS_ANALYSIS*
+NEW_METRICS_ADDED*
+test_uncertanty_layout.png 
+FINAL_VISUALIZATION_*
+COMPLETE_METRICS_UPDATE*
+test_latex_table.py
+test_uncertainty_*
+visualization_suite.py 
+test_model_performance*
+FINAL_IMPLEMENTATION_SUMMARY*
+
 
 
 profile.out
