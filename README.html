@@ -85,7 +85,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="gam-ssm-lur-hybrid-generalized-additive-modelstate-space-model-for-land-use-regression" class="level1">
 <h1>GAM-SSM-LUR: Hybrid Generalized Additive Model–State Space Model for Land Use Regression</h1>
 <p><a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9+-blue.svg" class="img-fluid" alt="Python 3.9+"></a> <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" class="img-fluid" alt="License: MIT"></a> <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" class="img-fluid" alt="Code style: black"></a></p>
-<p>A Python framework for spatiotemporal air pollution modelling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.</p>
+<p>A Python framework for spatio-temporal air pollution modelling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.</p>
 <section id="overview" class="level2">
 <h2 class="anchored" data-anchor-id="overview">Overview</h2>
 <p>Traditional Land Use Regression (LUR) models capture spatial heterogeneity in air pollution but treat temporal variation through model structure rather than as an explicit dynamical process. This package implements a hybrid framework that:</p>
@@ -303,38 +303,56 @@ pip install gam-ssm-lur[dev]
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co"># into ./data.</span></span>
 <span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 1: Run with your own data (auto-detects columns interactively)</span></span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="at">--data-file</span> data/data_table.csv</span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 2: Quick test with limited records (faster for testing)</span></span>
-<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
-<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> data/data_table.csv <span class="dt">\</span></span>
-<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-records</span> 100 <span class="dt">\</span></span>
-<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 1: Quick test with limited records (faster for testing)</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Note: Use at least 20000 records to ensure EPA measurements are included</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="co"># (first valid EPA value appears around row 15158 in the default dataset)</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> data/data_table.csv <span class="dt">\</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-records</span> 20000 <span class="dt">\</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>  </span>
 <span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 3: Run with specific column names (non-interactive)</span></span>
-<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
-<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> /path/to/your_data.csv <span class="dt">\</span></span>
-<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--timestamp-col</span> timestamp <span class="dt">\</span></span>
-<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>  <span class="at">--target-col</span> epa_no2 <span class="dt">\</span></span>
-<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--location-col</span> grid_id <span class="dt">\</span></span>
-<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--lat-col</span> latitude <span class="dt">\</span></span>
-<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--lon-col</span> longitude <span class="dt">\</span></span>
-<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
-<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 4: Large datasets — force diagonal scalability mode to save memory</span></span>
-<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
-<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> /path/to/your_data.csv <span class="dt">\</span></span>
-<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a>  <span class="at">--scalability-mode</span> diagonal <span class="dt">\</span></span>
-<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
-<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 5: Customize output location</span></span>
-<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
-<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> data/data_table.csv <span class="dt">\</span></span>
-<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-dir</span> my_results <span class="dt">\</span></span>
-<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">--run-name</span> experiment_2024</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 2: Run with the entire dataset (auto-detects columns interactively). This takes longer depending on your machine.</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="at">--data-file</span> data/data_table.csv</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 3: Run with specific column names (non-interactive)</span></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> /path/to/your_data.csv <span class="dt">\</span></span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">--timestamp-col</span> timestamp <span class="dt">\</span></span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--target-col</span> epa_no2 <span class="dt">\</span></span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>  <span class="at">--location-col</span> grid_id <span class="dt">\</span></span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a>  <span class="at">--lat-col</span> latitude <span class="dt">\</span></span>
+<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a>  <span class="at">--lon-col</span> longitude <span class="dt">\</span></span>
+<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
+<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 4: Large datasets — force diagonal scalability mode to save memory</span></span>
+<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
+<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> /path/to/your_data.csv <span class="dt">\</span></span>
+<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">--scalability-mode</span> diagonal <span class="dt">\</span></span>
+<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span>
+<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-36"><a href="#cb4-36" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 5: Customize output location</span></span>
+<span id="cb4-37"><a href="#cb4-37" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
+<span id="cb4-38"><a href="#cb4-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> data/data_table.csv <span class="dt">\</span></span>
+<span id="cb4-39"><a href="#cb4-39" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-dir</span> my_results <span class="dt">\</span></span>
+<span id="cb4-40"><a href="#cb4-40" aria-hidden="true" tabindex="-1"></a>  <span class="at">--run-name</span> experiment_2024</span>
+<span id="cb4-41"><a href="#cb4-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-42"><a href="#cb4-42" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 6: Specify custom locations for uncertainty plot (Figure 9)</span></span>
+<span id="cb4-43"><a href="#cb4-43" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> experiments/reproduce_paper.py <span class="dt">\</span></span>
+<span id="cb4-44"><a href="#cb4-44" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-file</span> data/data_table.csv <span class="dt">\</span></span>
+<span id="cb4-45"><a href="#cb4-45" aria-hidden="true" tabindex="-1"></a>  <span class="at">--uncertainty-locations</span> <span class="st">"0,5,10,15"</span> <span class="dt">\</span></span>
+<span id="cb4-46"><a href="#cb4-46" aria-hidden="true" tabindex="-1"></a>  <span class="at">--yes</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<section id="output-files" class="level3">
+<h3 class="anchored" data-anchor-id="output-files">Output Files</h3>
+<p>The script generates the following outputs in <code>results/reproduce_paper_YYYYMMDD_HHMMSS/</code>:</p>
+<p><strong>Tables:</strong> - <code>tables/table2_model_comparison.csv</code> - Performance metrics in CSV format - <code>tables/table2_model_comparison.tex</code> - <strong>LaTeX table for publication</strong> (NEW!)</p>
+<p><strong>Figures:</strong> - <code>figures/fig6_convergence.png</code> - EM algorithm convergence diagnostics - <code>figures/fig7_observed_vs_predicted.png</code> - Scatter plot comparison - <code>figures/fig8_residual_diagnostics.png</code> - 6-panel residual analysis - <code>figures/fig9_uncertainty_timeseries.png</code> - 4-location uncertainty intervals - <code>figures/fig9b_temporal_evolution.png</code> - 6-location time series - <code>figures/fig9c_spatial_patterns.png</code> - 4-timestep spatial distribution - <code>figures/fig10_spatial_comparison.png</code> - GAM-LUR vs GAM-SSM maps - <code>figures/fig11_shap_importance.png</code> - SHAP feature importance - <code>figures/fig12_residual_hotspots.png</code> - Spatial error analysis - <code>figures/fig13_morans_i.png</code> - Spatial autocorrelation - <code>figures/fig14_variogram.png</code> - Semivariogram analysis - <code>figures/fig15-18_*.png</code> - Gridded surface maps (if not skipped)</p>
+<p>The LaTeX table can be directly included in your manuscript using <code>\input{table2_model_comparison.tex}</code>.</p>
 <p><strong>Your CSV file should contain:</strong> - A timestamp column (e.g., <code>timestamp</code>, <code>date</code>, <code>datetime</code>) - A target NO₂ column (e.g., <code>epa_no2</code>, <code>no2</code>) - A location identifier (e.g., <code>grid_id</code>, <code>location_id</code>, <code>station_id</code>) - Latitude and longitude columns (e.g., <code>latitude</code>, <code>longitude</code>) - Spatial feature columns (e.g., <code>traffic_volume</code>, <code>motorway_50m</code>, etc.)</p>
 <p>The script will auto-detect these columns and ask for confirmation before running.</p>
+</section>
 </section>
 <section id="citation" class="level2">
 <h2 class="anchored" data-anchor-id="citation">Citation</h2>
