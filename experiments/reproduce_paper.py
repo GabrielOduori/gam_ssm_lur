@@ -418,21 +418,13 @@ def _clean_merged_dataframe(
     # Interpolate EPA target within each location over time, then fill remaining with median/zero
     df = df.sort_values([location_col, timestamp_col])
 
+    # Interpolate per-location timelines and align back to the original row order
     def _interp_target(group: pd.DataFrame) -> pd.Series:
         series = group.set_index(timestamp_col)[target_col].sort_index()
         series_interp = series.interpolate(method="time", limit_direction="both")
-        return series_interp.reindex(series.index)
+        return pd.Series(series_interp.reindex(series.index).values, index=group.index)
 
-    # Avoid pandas FutureWarning about including grouping columns by operating on
-    # the target Series after setting timestamp as the index.
-    df_idxed = df.set_index(timestamp_col)
-    interpolated = (
-        df_idxed.groupby(location_col)[target_col]
-        .apply(lambda s: s.sort_index().interpolate(method="time", limit_direction="both"))
-        .reset_index(level=0, drop=True)
-    )
-    # Reindex to original timestamp order within the sorted dataframe
-    df[target_col] = interpolated.reindex(df_idxed.index)
+    df[target_col] = df.groupby(location_col, group_keys=False).apply(_interp_target)
     # Fill any remaining gaps with global median; if none, fail fast
     median_target = df[target_col].median()
     if pd.isna(median_target):
