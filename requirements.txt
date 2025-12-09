@@ -19,6 +19,7 @@ statsmodels>=0.13.0
 esda>=2.4.0
 libpysal>=4.5.0
 scikit-gstat>=1.0.0
+jinja2>=3.0.0  # Required for pandas LaTeX table export
 
 # Data acquisition extras
 osmnx>=1.2.0

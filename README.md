@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A Python framework for spatiotemporal air pollution modelling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.
+A Python framework for spatio-temporal air pollution modelling that integrates Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved prediction accuracy and uncertainty quantification.
 
 ## Overview
 
@@ -171,9 +171,11 @@ To reproduce the results from the paper:
 
 
 # Option 1: Quick test with limited records (faster for testing)
+# Note: Use at least 20000 records to ensure EPA measurements are included
+# (first valid EPA value appears around row 15158 in the default dataset)
 python experiments/reproduce_paper.py \
   --data-file data/data_table.csv \
-  --max-records 100 \
+  --max-records 20000 \
   --yes
   
 
@@ -203,7 +205,37 @@ python experiments/reproduce_paper.py \
   --data-file data/data_table.csv \
   --output-dir my_results \
   --run-name experiment_2024
+
+# Option 6: Specify custom locations for uncertainty plot (Figure 9)
+python experiments/reproduce_paper.py \
+  --data-file data/data_table.csv \
+  --uncertainty-locations "0,5,10,15" \
+  --yes
 ```
+
+### Output Files
+
+The script generates the following outputs in `results/reproduce_paper_YYYYMMDD_HHMMSS/`:
+
+**Tables:**
+- `tables/table2_model_comparison.csv` - Performance metrics in CSV format
+- `tables/table2_model_comparison.tex` - **LaTeX table for publication** (NEW!)
+
+**Figures:**
+- `figures/fig6_convergence.png` - EM algorithm convergence diagnostics
+- `figures/fig7_observed_vs_predicted.png` - Scatter plot comparison
+- `figures/fig8_residual_diagnostics.png` - 6-panel residual analysis
+- `figures/fig9_uncertainty_timeseries.png` - 4-location uncertainty intervals
+- `figures/fig9b_temporal_evolution.png` - 6-location time series
+- `figures/fig9c_spatial_patterns.png` - 4-timestep spatial distribution
+- `figures/fig10_spatial_comparison.png` - GAM-LUR vs GAM-SSM maps
+- `figures/fig11_shap_importance.png` - SHAP feature importance
+- `figures/fig12_residual_hotspots.png` - Spatial error analysis
+- `figures/fig13_morans_i.png` - Spatial autocorrelation
+- `figures/fig14_variogram.png` - Semivariogram analysis
+- `figures/fig15-18_*.png` - Gridded surface maps (if not skipped)
+
+The LaTeX table can be directly included in your manuscript using `\input{table2_model_comparison.tex}`.
 
 **Your CSV file should contain:**
 - A timestamp column (e.g., `timestamp`, `date`, `datetime`)
