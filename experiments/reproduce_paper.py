@@ -423,11 +423,16 @@ def _clean_merged_dataframe(
         series_interp = series.interpolate(method="time", limit_direction="both")
         return series_interp.reindex(series.index)
 
-    df[target_col] = (
-        df.groupby(location_col, group_keys=False)
-        .apply(_interp_target)
+    # Avoid pandas FutureWarning about including grouping columns by operating on
+    # the target Series after setting timestamp as the index.
+    df_idxed = df.set_index(timestamp_col)
+    interpolated = (
+        df_idxed.groupby(location_col)[target_col]
+        .apply(lambda s: s.sort_index().interpolate(method="time", limit_direction="both"))
         .reset_index(level=0, drop=True)
     )
+    # Reindex to original timestamp order within the sorted dataframe
+    df[target_col] = interpolated.reindex(df_idxed.index)
     # Fill any remaining gaps with global median; if none, fail fast
     median_target = df[target_col].median()
     if pd.isna(median_target):
