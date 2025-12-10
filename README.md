@@ -16,7 +16,7 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 
 ## Key Features
 
-- **Hybrid spatiotemporal modelling** combining interpretable GAMs with dynamic state space models
+- **Hybrid spatio-temporal modelling** combining interpretable GAMs with dynamic state space models
 - **Principled uncertainty quantification** via Kalman filtering and smoothing
 - **Scalable inference** through adaptive matrix representations (dense, sparse, block-diagonal)
 - **Modular design** allowing component-wise customisation
