@@ -37,6 +37,7 @@ from mapping_utils import (
     create_gridded_residual_map,
     create_uncertainty_surface,
     create_temporal_gridded_sequence,
+    adjust_shared_colorbar_height,
 )
 from gam_ssm_lur.data_check import check_data_availability
 
@@ -1106,16 +1107,9 @@ def plot_temporal_evolution(
     lower = predictions.lower
     upper = predictions.upper
 
-    # Setup x-axis
+    # Setup x-axis - use time steps for cleaner display
     x_vals = timesteps
     x_label = "Time step"
-    if time_labels is not None and len(time_labels) == model.n_times_:
-        x_vals = time_labels
-        try:
-            x_vals = pd.to_datetime(x_vals)
-            x_label = "Date"
-        except Exception:
-            x_label = "Time"
 
     for i, loc in enumerate(selected_locations):
         if i >= len(axes):
@@ -1123,18 +1117,20 @@ def plot_temporal_evolution(
 
         ax = axes[i]
 
-        # Plot uncertainty band
+        # Plot predicted line (blue, like fig8 temporal pattern)
+        ax.plot(x_vals, smoothed[:, loc], "b-", lw=2, label="Predicted", color='#3498db')
+
+        # Plot uncertainty band (blue shaded, like fig8)
         ax.fill_between(
             x_vals,
             lower[:, loc],
             upper[:, loc],
-            alpha=0.2,
-            color='#3498db',
+            alpha=0.3,
             label="95% CI",
-            zorder=1
+            color='#3498db'
         )
 
-        # Plot observed vs smoothed
+        # Plot observed points (simple markers)
         ax.plot(
             x_vals,
             observed[:, loc],
@@ -1142,29 +1138,14 @@ def plot_temporal_evolution(
             alpha=0.6,
             label="Observed",
             markersize=2.5,
-            linewidth=1,
-            color='#2c3e50',
-            zorder=3
-        )
-        ax.plot(
-            x_vals,
-            smoothed[:, loc],
-            '-',
-            label="Predicted",
-            linewidth=1.5,
-            color='#3498db',
-            zorder=2
+            color='#2c3e50'
         )
 
         ax.set_title(f"Location {loc}", fontsize=10, fontweight='bold')
         ax.set_xlabel(x_label, fontsize=9)
         ax.set_ylabel("NO₂ (µg/m³)", fontsize=9)
-        ax.legend(fontsize=7, framealpha=0.9)
-        ax.grid(True, alpha=0.3, linestyle='--')
-
-        # Rotate x-axis labels if dates
-        if isinstance(x_vals, pd.DatetimeIndex):
-            ax.tick_params(axis='x', rotation=45)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
 
     # Hide empty subplots
     for i in range(len(selected_locations), len(axes)):
@@ -1405,6 +1386,8 @@ def create_residual_hotspot_map(
     cbar.set_label("RMSE (µg/m³)")
 
     plt.tight_layout()
+    adjust_shared_colorbar_height(fig, axes)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     logger.info(f"Saved residual hotspot map to {output_path}")
@@ -1418,8 +1401,27 @@ def create_shap_importance_plot(
     feature_names: list[str],
     output_path: Path,
     max_samples: int = 800,
+    max_display: int = 15,
 ) -> None:
-    """Create SHAP summary plot for the baseline GAM-LUR model. Falls back to permutation importance."""
+    """Create SHAP summary plot for the baseline GAM-LUR model. Falls back to permutation importance.
+
+    Parameters
+    ----------
+    baseline : dict
+        Baseline model results
+    X : np.ndarray
+        Feature matrix
+    y : np.ndarray
+        Target values
+    feature_names : list[str]
+        Feature names
+    output_path : Path
+        Output file path
+    max_samples : int
+        Maximum samples for SHAP computation
+    max_display : int
+        Maximum number of features to display (default: 15)
+    """
     model = baseline["model"]
     tried_shap = False
     try:
@@ -1438,8 +1440,11 @@ def create_shap_importance_plot(
             predict_fn, shap.sample(X_sample, min(200, len(X_sample)))
         )
         shap_values = explainer.shap_values(X_sample, nsamples=100)
+
+        # Show only top features
         shap.summary_plot(
-            shap_values, X_sample, feature_names=feature_names, show=False
+            shap_values, X_sample, feature_names=feature_names,
+            max_display=max_display, show=False, seed=42
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         import matplotlib.pyplot as plt
@@ -1447,7 +1452,7 @@ def create_shap_importance_plot(
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close()
-        logger.info(f"Saved SHAP summary plot to {output_path}")
+        logger.info(f"Saved SHAP summary plot (top {max_display} features) to {output_path}")
         return
     except Exception as e:
         if tried_shap:
@@ -1472,17 +1477,29 @@ def create_shap_importance_plot(
         deltas.append(perm_rmse - baseline_rmse)
     deltas = np.array(deltas)
 
-    sorted_idx = np.argsort(deltas)[::-1]
-    plt.figure(figsize=(8, max(4, 0.3 * len(feature_names))))
-    plt.barh(np.array(feature_names)[sorted_idx], deltas[sorted_idx], color="slateblue")
-    plt.xlabel("RMSE increase when permuted (µg/m³)")
-    plt.title("Feature importance (permutation fallback)")
+    # Show only top features
+    sorted_idx = np.argsort(deltas)[::-1][:max_display]
+    top_features = np.array(feature_names)[sorted_idx]
+    top_deltas = deltas[sorted_idx]
+
+    plt.figure(figsize=(10, max(6, 0.4 * max_display)))
+    bars = plt.barh(top_features, top_deltas, color="slateblue", edgecolor='black', linewidth=0.5)
+
+    # Add value labels on bars
+    for i, (bar, val) in enumerate(zip(bars, top_deltas)):
+        plt.text(val + 0.01 * top_deltas.max(), i, f'{val:.3f}',
+                va='center', fontsize=9)
+
+    plt.xlabel("RMSE increase when permuted (µg/m³)", fontsize=11)
+    plt.ylabel("Features", fontsize=11)
+    plt.title(f"Top {max_display} Feature Importance (Permutation)", fontsize=12, fontweight='bold')
     plt.gca().invert_yaxis()
+    plt.grid(axis='x', alpha=0.3, linestyle='--')
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
-    logger.info(f"Saved permutation importance plot to {output_path}")
+    logger.info(f"Saved permutation importance plot (top {max_display} features) to {output_path}")
 
 
 def create_morans_i_plot(
@@ -1924,29 +1941,14 @@ Examples:
                 if loc not in loc_ids and len(loc_ids) < 4:
                     loc_ids.append(loc)
 
+        # Setup x-axis - use time steps for cleaner display
         t_range = np.arange(model.n_times_)
         x_vals = t_range
         x_label = "Time step"
-        if time_labels is not None and len(time_labels) == model.n_times_:
-            x_vals = time_labels
-            # Try formatting as dates if possible
-            try:
-                x_vals = pd.to_datetime(x_vals)
-                x_label = "Date"
-            except Exception:
-                x_label = "Time"
 
         # Create 2x2 subplot layout
         fig, axes = plt.subplots(2, 2, figsize=(16, 10))
         axes = axes.flatten()
-
-        # Define colors for better aesthetics
-        colors = {
-            'observed': '#2c3e50',      # Dark gray-blue
-            'predicted': '#3498db',      # Bright blue
-            'ci_fill': '#3498db',        # Same blue for CI
-            'grid': '#bdc3c7'            # Light gray
-        }
 
         for idx, loc_id in enumerate(loc_ids):
             ax = axes[idx]
@@ -1957,38 +1959,28 @@ Examples:
             mean_obs = np.nanmean(obs_loc)
             rmse_loc = np.sqrt(np.nanmean((obs_loc - pred_loc) ** 2))
 
-            # Plot uncertainty band first (so it's behind)
+            # Plot predicted line (blue, like fig8 temporal pattern)
+            ax.plot(x_vals, pred_loc, "b-", lw=2, label="Predicted", color='#3498db')
+
+            # Plot uncertainty band (blue shaded, like fig8)
             ax.fill_between(
                 x_vals,
                 predictions.lower[:, loc_id],
                 predictions.upper[:, loc_id],
-                alpha=0.2,
-                color=colors['ci_fill'],
+                alpha=0.3,
                 label=f"{int(model.confidence_level * 100)}% CI",
-                zorder=1
+                color='#3498db'
             )
 
-            # Plot observed values
+            # Plot observed points (simple markers)
             ax.plot(
                 x_vals,
                 obs_loc,
                 'o',
-                color=colors['observed'],
+                color='#2c3e50',
                 markersize=2.5,
                 alpha=0.6,
-                label="Observed",
-                zorder=3
-            )
-
-            # Plot predicted values
-            ax.plot(
-                x_vals,
-                pred_loc,
-                '-',
-                color=colors['predicted'],
-                lw=1.5,
-                label="Predicted",
-                zorder=2
+                label="Observed"
             )
 
             ax.set_xlabel(x_label, fontsize=10)
@@ -1998,12 +1990,8 @@ Examples:
                 fontsize=10,
                 pad=10
             )
-            ax.legend(loc='best', fontsize=7, framealpha=0.9)
-            ax.grid(True, alpha=0.25, linestyle='--', color=colors['grid'], linewidth=0.5)
-
-            # Rotate x-axis labels if dates
-            if isinstance(x_vals, pd.DatetimeIndex):
-                ax.tick_params(axis='x', rotation=45)
+            ax.legend(loc='best', fontsize=9)
+            ax.grid(True, alpha=0.3)
 
         # Calculate overall statistics for subtitle
         overall_rmse = np.sqrt(np.nanmean((model._y_matrix - predictions.total) ** 2))

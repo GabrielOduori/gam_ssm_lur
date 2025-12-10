@@ -32,6 +32,7 @@ from mapping_utils import (
     create_gridded_residual_map,
     create_uncertainty_surface,
     create_temporal_gridded_sequence,
+    adjust_colorbars_to_axes,
 )
 
 # Set publication-quality defaults
@@ -263,8 +264,10 @@ def create_difference_map(data, time_idx=25):
     
     fig.suptitle(f'Prediction Error Comparison - Day {time_idx}',
                 fontsize=14, fontweight='bold', y=1.02)
-    
+
     plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+
     plt.savefig(OUTPUT_DIR / 'fig3_difference_map.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {OUTPUT_DIR / 'fig3_difference_map.png'}")
@@ -318,8 +321,15 @@ def create_temporal_sequence(data, time_points=None):
     
     fig.suptitle('Temporal Evolution: Observed (top) vs GAM-SSM Predicted (bottom)',
                 fontsize=14, fontweight='bold', y=1.02)
-    
+
     plt.tight_layout()
+
+    # Adjust the 2 colorbars (one for each row) at the last column
+    if n_times > 0 and len(fig.axes) >= 2*n_times + 2:
+        # Colorbar indices: after all plot axes
+        adjust_colorbars_to_axes(fig, [axes[0, -1], axes[1, -1]],
+                                colorbar_indices=[2*n_times, 2*n_times + 1])
+
     plt.savefig(OUTPUT_DIR / 'fig4_temporal_sequence.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {OUTPUT_DIR / 'fig4_temporal_sequence.png'}")
@@ -363,8 +373,10 @@ def create_uncertainty_surface(data, time_idx=25):
     
     fig.suptitle(f'GAM-SSM Prediction with Uncertainty - Day {time_idx}',
                 fontsize=14, fontweight='bold', y=1.02)
-    
+
     plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+
     plt.savefig(OUTPUT_DIR / 'fig5_uncertainty_surface.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {OUTPUT_DIR / 'fig5_uncertainty_surface.png'}")
@@ -425,8 +437,10 @@ def create_rmse_surface(data):
     
     fig.suptitle('Spatial Distribution of Model Error',
                 fontsize=14, fontweight='bold', y=1.01)
-    
+
     plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+
     plt.savefig(OUTPUT_DIR / 'fig6_rmse_surface.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {OUTPUT_DIR / 'fig6_rmse_surface.png'}")

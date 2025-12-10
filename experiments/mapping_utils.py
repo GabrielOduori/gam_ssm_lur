@@ -24,6 +24,109 @@ from scipy.interpolate import RBFInterpolator, griddata
 from scipy.ndimage import gaussian_filter
 
 
+def adjust_colorbar_height(fig, ax_index, cbar_index):
+    """
+    Adjust a single colorbar to match the height of its corresponding axes.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure containing the axes and colorbar
+    ax_index : int
+        Index of the main axes in fig.axes
+    cbar_index : int
+        Index of the colorbar axes in fig.axes
+    """
+    ax = fig.axes[ax_index]
+    cbar_ax = fig.axes[cbar_index]
+    pos = ax.get_position()
+    cbar_pos = cbar_ax.get_position()
+    cbar_ax.set_position([
+        cbar_pos.x0,
+        pos.y0,
+        cbar_pos.width,
+        pos.height
+    ])
+
+
+def adjust_colorbars_to_axes(fig, axes, colorbar_indices=None):
+    """
+    Adjust multiple colorbars to match the heights of their corresponding axes.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure containing the axes and colorbars
+    axes : array-like
+        Array of axes objects (can be 1D or 2D array from plt.subplots)
+    colorbar_indices : list of int, optional
+        Indices of colorbar axes in fig.axes. If None, assumes colorbars
+        come immediately after the main axes in order.
+
+    Examples
+    --------
+    # For a 1x3 subplot with 3 colorbars
+    fig, axes = plt.subplots(1, 3)
+    # ... create plots with colorbars ...
+    plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+
+    # For a 2x2 subplot with 4 colorbars
+    fig, axes = plt.subplots(2, 2)
+    # ... create plots with colorbars ...
+    plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+    """
+    axes_flat = np.atleast_1d(axes).ravel()
+    n_axes = len(axes_flat)
+
+    if colorbar_indices is None:
+        # Assume colorbars come after main axes
+        colorbar_indices = list(range(n_axes, n_axes + n_axes))
+
+    for i, cbar_idx in enumerate(colorbar_indices):
+        if i < len(axes_flat) and cbar_idx < len(fig.axes):
+            adjust_colorbar_height(fig, i, cbar_idx)
+
+
+def adjust_shared_colorbar_height(fig, axes, cbar_index=-1):
+    """
+    Adjust a shared colorbar to span the full height of multiple axes.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure containing the axes and colorbar
+    axes : array-like
+        Array of axes objects that the colorbar should span
+    cbar_index : int, optional
+        Index of the colorbar axes in fig.axes (default: -1 for last axes)
+
+    Examples
+    --------
+    # For a shared colorbar spanning all subplots
+    fig, axes = plt.subplots(2, 3)
+    # ... create plots ...
+    fig.colorbar(im, ax=axes.ravel().tolist(), ...)
+    plt.tight_layout()
+    adjust_shared_colorbar_height(fig, axes)
+    """
+    cbar_ax = fig.axes[cbar_index]
+    axes_flat = np.atleast_1d(axes).ravel()
+
+    # Get position from first and last axes to span full height
+    pos_first = axes_flat[0].get_position()
+    pos_last = axes_flat[-1].get_position()
+    cbar_pos = cbar_ax.get_position()
+
+    cbar_ax.set_position([
+        cbar_pos.x0,
+        pos_last.y0,
+        cbar_pos.width,
+        pos_first.y1 - pos_last.y0
+    ])
+
+
 def plot_triptych_no2(
     df: pd.DataFrame,
     lon_col: str = "longitude",
@@ -126,6 +229,10 @@ def plot_weekly_lur_maps(
 
     fig.suptitle(f"Daily LUR NO₂ Maps ({dates[0].date()} – {dates[-1].date()})", fontsize=16, y=0.92)
     fig.tight_layout()
+
+    # Adjust colorbar to match axes height
+    active_axes = [axes[i] for i in range(len(dates))]
+    adjust_shared_colorbar_height(fig, active_axes)
 
     outfile = Path(outfile)
     outfile.parent.mkdir(parents=True, exist_ok=True)
@@ -353,9 +460,9 @@ def plot_gridded_surface(
         )
         ax.clabel(cs, inline=True, fontsize=7, fmt='%.0f')
 
-    # Colorbar
+    # Colorbar - match height to map
     if colorbar:
-        cbar = plt.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, aspect=20)
         cbar.set_label(colorbar_label, fontsize=10)
 
     # Labels
@@ -431,22 +538,28 @@ def create_gridded_comparison(
         obs_grid, Lon, Lat, ax=axes[0],
         title='(a) Observed NO₂',
         vmin=vmin, vmax=vmax,
-        contours=True, n_contours=8
+        contours=True, n_contours=8,
+        colorbar=False
     )
 
     plot_gridded_surface(
         baseline_grid, Lon, Lat, ax=axes[1],
         title='(b) GAM-LUR Predicted',
         vmin=vmin, vmax=vmax,
-        contours=True, n_contours=8
+        contours=True, n_contours=8,
+        colorbar=False
     )
 
-    plot_gridded_surface(
+    im = plot_gridded_surface(
         hybrid_grid, Lon, Lat, ax=axes[2],
         title='(c) Hybrid GAM-SSM Predicted',
         vmin=vmin, vmax=vmax,
-        contours=True, n_contours=8
+        contours=True, n_contours=8,
+        colorbar=False
     )
+
+    # Add shared colorbar with proper height
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.046, pad=0.04, aspect=20, label='NO₂ (µg/m³)')
 
     fig.suptitle(
         f'NO₂ Concentration Surfaces{title_suffix}',
@@ -454,6 +567,8 @@ def create_gridded_comparison(
     )
 
     plt.tight_layout()
+    adjust_shared_colorbar_height(fig, axes)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -652,28 +767,39 @@ def create_uncertainty_surface(
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
     # Mean prediction
-    plot_gridded_surface(
+    im1 = plot_gridded_surface(
         mean_grid, Lon, Lat, ax=axes[0],
         title='(a) Predicted Mean NO₂',
-        contours=True, n_contours=8
+        contours=True, n_contours=8,
+        colorbar=False
     )
 
     # Prediction SD
-    plot_gridded_surface(
+    im2 = plot_gridded_surface(
         std_grid, Lon, Lat, ax=axes[1],
         title='(b) Prediction Uncertainty (SD)',
         cmap='YlOrRd',
-        colorbar_label='SD (µg/m³)'
+        colorbar=False
     )
 
     # Coefficient of variation
-    plot_gridded_surface(
+    im3 = plot_gridded_surface(
         cv_grid, Lon, Lat, ax=axes[2],
         title='(c) Coefficient of Variation',
         cmap='YlOrRd',
         vmin=0, vmax=15,
-        colorbar_label='CV (%)'
+        colorbar=False
     )
+
+    # Add individual colorbars with proper height for each panel
+    cbar1 = fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04, aspect=20)
+    cbar1.set_label('NO₂ (µg/m³)', fontsize=10)
+
+    cbar2 = fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04, aspect=20)
+    cbar2.set_label('SD (µg/m³)', fontsize=10)
+
+    cbar3 = fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04, aspect=20)
+    cbar3.set_label('CV (%)', fontsize=10)
 
     fig.suptitle(
         'GAM-SSM Prediction with Uncertainty',
@@ -681,6 +807,8 @@ def create_uncertainty_surface(
     )
 
     plt.tight_layout()
+    adjust_colorbars_to_axes(fig, axes)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -751,11 +879,11 @@ def create_temporal_gridded_sequence(
     for i, t_idx in enumerate(time_points):
         # Observed (top row)
         ax = axes[0, i]
-        plot_gridded_surface(
+        im = plot_gridded_surface(
             all_obs[i], Lon, Lat, ax=ax,
             title=f'Time {t_idx}',
             vmin=vmin, vmax=vmax,
-            colorbar=(i == n_times - 1),
+            colorbar=False,  # We'll add a shared colorbar
             show_coords=(i == 0)
         )
         if i == 0:
@@ -769,7 +897,7 @@ def create_temporal_gridded_sequence(
             all_pred[i], Lon, Lat, ax=ax,
             title='',
             vmin=vmin, vmax=vmax,
-            colorbar=(i == n_times - 1),
+            colorbar=False,  # We'll add a shared colorbar
             show_coords=(i == 0)
         )
         if i == 0:
@@ -777,12 +905,17 @@ def create_temporal_gridded_sequence(
         else:
             ax.set_ylabel('')
 
+    # Add a single colorbar that spans both rows on the right
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.015, pad=0.04, aspect=20, label='NO₂ (µg/m³)')
+
     fig.suptitle(
         'Temporal Evolution: Observed (top) vs GAM-SSM Predicted (bottom)',
         fontsize=14, fontweight='bold', y=1.02
     )
 
     plt.tight_layout()
+    adjust_shared_colorbar_height(fig, axes)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
