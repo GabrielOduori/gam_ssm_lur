@@ -283,5 +283,5 @@ This work was supported by:
 
 ## Contact
 
-- Gabriel Oduori - gabriel.oduori@ucd.ie
+- Gabriel Oduori - gabriel.oduori@ucdconnect.ie
 - Project Link: https://github.com/GabrielOduori/gam_ssm_lur
