@@ -33,8 +33,8 @@ pip install gam-ssm-lur
 ### From source
 
 ```bash
-git clone https://github.com/GabrielOduori/lur_space_state_model.git
-cd lur_space_state_model
+git clone https://github.com/GabrielOduori/gam_ssm_lur.git
+cd gam_ssm_lur
 pip install -e ".[dev]"
 ```
 <!-- 
@@ -284,4 +284,4 @@ This work was supported by:
 ## Contact
 
 - Gabriel Oduori - gabriel.oduori@ucd.ie
-- Project Link: https://github.com/GabrielOduori/lur_space_state_model
+- Project Link: https://github.com/GabrielOduori/gam_ssm_lur
