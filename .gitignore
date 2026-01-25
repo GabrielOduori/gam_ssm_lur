@@ -234,3 +234,7 @@ secrets.json
 # Notebook outputs
 *.ipynb
 !experiments/*.ipynb
+
+# Presentations and talks
+presentations_talks/
+talks/

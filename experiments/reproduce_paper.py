@@ -66,6 +66,7 @@ BASE_FEATURE_PREFIXES = [
 
 DEFAULT_DATA_URL = "https://zenodo.org/record/16534138/files/data_table.zip?download=1"
 DEFAULT_DATA_FILE = Path("data") / "data_table.csv"
+OSM_MIN_NONZERO = 150
 
 
 def auto_detect_columns(df: pd.DataFrame) -> dict[str, str]:
@@ -485,6 +486,28 @@ def _clean_merged_dataframe(
         median = df[f].median()
         df[f] = df[f].fillna(0 if pd.isna(median) else median)
         clean_features.append(f)
+
+    if OSM_MIN_NONZERO > len(clean_features):
+        logger.warning(
+            "OSM non-zero threshold (%d) exceeds available OSM feature columns (%d); skipping row filter.",
+            OSM_MIN_NONZERO,
+            len(clean_features),
+        )
+    else:
+        nonzero_counts = (df[clean_features] != 0).sum(axis=1)
+        before_rows = len(df)
+        df = df.loc[nonzero_counts >= OSM_MIN_NONZERO].copy()
+        after_rows = len(df)
+        logger.info(
+            "Filtered rows by OSM non-zero threshold (>=%d): %d -> %d rows",
+            OSM_MIN_NONZERO,
+            before_rows,
+            after_rows,
+        )
+        if df.empty:
+            raise ValueError(
+                f"No rows remaining after OSM non-zero filter (threshold={OSM_MIN_NONZERO})."
+            )
 
     return df, clean_features, target_col
 
