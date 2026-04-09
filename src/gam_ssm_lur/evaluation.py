@@ -85,36 +85,21 @@ class CalibrationMetrics:
 @dataclass
 class ResidualDiagnostics:
     """Container for residual diagnostic results.
-    
+
     Attributes
     ----------
     mean : float
         Mean of residuals (should be ~0)
     std : float
         Standard deviation of residuals
-    skewness : float
-        Skewness of residuals
     kurtosis : float
         Excess kurtosis of residuals
-    shapiro_statistic : float
-        Shapiro-Wilk test statistic
-    shapiro_pvalue : float
-        Shapiro-Wilk test p-value
-    ljung_box_statistic : float
-        Ljung-Box test statistic for autocorrelation
-    ljung_box_pvalue : float
-        Ljung-Box test p-value
     acf : NDArray
         Autocorrelation function values
     """
     mean: float
     std: float
-    skewness: float
     kurtosis: float
-    shapiro_statistic: float
-    shapiro_pvalue: float
-    ljung_box_statistic: float
-    ljung_box_pvalue: float
     acf: NDArray
 
 
@@ -122,7 +107,7 @@ class ModelEvaluator:
     """Comprehensive model evaluation and diagnostics.
     
     Provides tools for assessing model performance including:
-    - Accuracy metrics (RMSE, MAE, R², etc.)
+    - Accuracy metrics (RMSE, MAE, R².)
     - Uncertainty calibration (coverage, interval width)
     - Residual diagnostics (normality, autocorrelation)
     - Visualization tools
@@ -283,44 +268,23 @@ class ModelEvaluator:
             Container with diagnostic results
         """
         from scipy import stats
-        
+
         if residuals is None:
             if self._residuals is None:
                 raise ValueError("No residuals available. Call compute_accuracy first.")
             residuals = self._residuals
         else:
             residuals = np.asarray(residuals).flatten()
-            
-        # Basic statistics
+
         mean = np.mean(residuals)
         std = np.std(residuals)
-        skewness = stats.skew(residuals)
         kurtosis = stats.kurtosis(residuals)
-        
-        # Normality test (use subset if too many points)
-        if len(residuals) > 5000:
-            sample_idx = np.random.choice(len(residuals), 5000, replace=False)
-            shapiro_stat, shapiro_p = stats.shapiro(residuals[sample_idx])
-        else:
-            shapiro_stat, shapiro_p = stats.shapiro(residuals)
-            
-        # Autocorrelation
         acf = self._compute_acf(residuals, max_lag)
-        
-        # Ljung-Box test for autocorrelation
-        n = len(residuals)
-        lb_stat = n * (n + 2) * np.sum(acf[1:]**2 / (n - np.arange(1, max_lag + 1)))
-        lb_p = 1 - stats.chi2.cdf(lb_stat, max_lag)
-        
+
         return ResidualDiagnostics(
             mean=mean,
             std=std,
-            skewness=skewness,
             kurtosis=kurtosis,
-            shapiro_statistic=shapiro_stat,
-            shapiro_pvalue=shapiro_p,
-            ljung_box_statistic=lb_stat,
-            ljung_box_pvalue=lb_p,
             acf=acf,
         )
         
@@ -435,7 +399,7 @@ class ModelEvaluator:
                 'r-', lw=2, label='Normal')
         ax.set_xlabel('Residuals')
         ax.set_ylabel('Density')
-        ax.set_title(f'Residual Distribution\n(skew={stats.skew(residuals):.2f}, kurt={stats.kurtosis(residuals):.2f})')
+        ax.set_title(f'Residual Distribution\n(kurt={stats.kurtosis(residuals):.2f})')
         ax.legend()
         
         # 5. Autocorrelation Function
@@ -625,7 +589,7 @@ class ModelEvaluator:
         y_pred: Optional[NDArray] = None,
         y_std: Optional[NDArray] = None,
     ) -> str:
-        """Generate comprehensive summary report.
+        """Generate summary report.
         
         Parameters
         ----------
@@ -691,16 +655,7 @@ class ModelEvaluator:
                 "-" * 40,
                 f"  Mean:     {diagnostics.mean:.4e}",
                 f"  Std:      {diagnostics.std:.4f}",
-                f"  Skewness: {diagnostics.skewness:.4f}",
                 f"  Kurtosis: {diagnostics.kurtosis:.4f}",
-                "",
-                "  Normality test (Shapiro-Wilk):",
-                f"    Statistic: {diagnostics.shapiro_statistic:.4f}",
-                f"    P-value:   {diagnostics.shapiro_pvalue:.4e}",
-                "",
-                "  Autocorrelation test (Ljung-Box):",
-                f"    Statistic: {diagnostics.ljung_box_statistic:.4f}",
-                f"    P-value:   {diagnostics.ljung_box_pvalue:.4e}",
                 "",
             ])
             
@@ -736,6 +691,112 @@ class ModelEvaluator:
         print(report)
         return report
         
+    def loocv_stations(
+        self,
+        station_obs: pd.DataFrame,
+        station_col: str = "station_id",
+        obs_col: str = "epa_no2",
+        grid_id_col: str = "grid_id",
+    ) -> pd.DataFrame:
+        """Leave-one-station-out cross-validation of the GAM spatial component.
+
+        For each monitoring station the GAM is refitted on all spatial cells
+        *except* the cell that contains the station.  The held-out cell is then
+        predicted and the result compared against the station's observed annual
+        mean concentration.
+
+        This follows the spatial LOOCV procedure of Naughton et al. (2018) and
+        is the primary validation metric for the LUR component.
+
+        Parameters
+        ----------
+        station_obs : pd.DataFrame
+            One row per station with at minimum ``station_id``, ``grid_id``,
+            and an observed-value column.  Pass the point-obs DataFrame from
+            ``SpatiotemporalDataset.load_temporal()`` aggregated to annual means,
+            or any DataFrame with those three columns.
+        station_col : str
+            Column that identifies the station.
+        obs_col : str
+            Column holding the observed concentration value.
+        grid_id_col : str
+            Column mapping each station to a model grid cell.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (station, leave-one-out prediction) with columns:
+            ``station_id``, ``grid_id``, ``obs_no2``, ``no2``.
+            Suitable for passing directly to
+            ``ModelComparisonVisualizer.plot_loocv_scatter()``.
+
+        Raises
+        ------
+        RuntimeError
+            If the model has not been fitted yet.
+        ValueError
+            If a station's ``grid_id`` is not found in the model's location IDs.
+        """
+        if self.model is None or not hasattr(self.model, "gam_") or self.model.gam_ is None:
+            raise RuntimeError(
+                "Model has not been fitted.  Call model.fit() or "
+                "model.fit_from_dataset() first."
+            )
+
+        X = self.model._X_train
+        y = self.model._y_train
+        loc_ids = list(self.model.location_ids_)
+
+        # Aggregate station obs to a single row per station (use mean if multiple)
+        station_summary = (
+            station_obs
+            .groupby([station_col, grid_id_col], as_index=False)[obs_col]
+            .mean()
+        )
+
+        records = []
+        for _, row in station_summary.iterrows():
+            sid   = row[station_col]
+            gid   = row[grid_id_col]
+            y_obs = float(row[obs_col])
+
+            if gid not in loc_ids:
+                logger.warning(
+                    "Station %s grid_id=%s not found in model locations — skipping",
+                    sid, gid,
+                )
+                continue
+
+            idx = loc_ids.index(gid)
+
+            # Build leave-one-out training set
+            mask = np.ones(len(loc_ids), dtype=bool)
+            mask[idx] = False
+            X_loo = X[mask]
+            y_loo = y[mask]
+
+            # Refit a fresh GAM with same hyper-params as the original
+            from gam_ssm_lur.models.spatial_gam import SpatialGAM
+            gam_loo = SpatialGAM(
+                n_splines=self.model.gam_.n_splines,
+                lam=self.model.gam_.lam,
+            )
+            gam_loo.fit(X_loo, y_loo)
+
+            # Predict for the held-out cell
+            y_pred = float(gam_loo.predict(X[[idx]])[0])
+
+            records.append({
+                station_col: sid,
+                grid_id_col: gid,
+                obs_col:     y_obs,
+                "no2":       y_pred,
+            })
+
+        result = pd.DataFrame(records).rename(columns={obs_col: "obs_no2", station_col: "station_id"})
+        logger.info("LOOCV complete: %d / %d stations evaluated", len(result), len(station_summary))
+        return result
+
     def compare_models(
         self,
         models: Dict[str, Tuple[NDArray, NDArray]],

@@ -389,21 +389,27 @@ class EMEstimator:
         log_likelihoods: List[float],
         iteration: int,
     ) -> bool:
-        """Check if EM has converged based on log-likelihood change."""
+        """Check if EM has converged based on relative log-likelihood change.
+
+        Uses a relative criterion so the same tolerance works across datasets
+        of different sizes:  |ΔLL| / max(1, |LL|) < tolerance
+        """
         if iteration < self.min_iterations:
             return False
-            
+
         if len(log_likelihoods) < 2:
             return False
-            
+
         ll_change = log_likelihoods[-1] - log_likelihoods[-2]
-        
+
         # EM should monotonically increase log-likelihood
-        # Small decreases can occur due to numerical issues
-        if ll_change < -1e-4:
-            logger.warning(f"Log-likelihood decreased at iteration {iteration}: {ll_change:.6e}")
-            
-        return abs(ll_change) < self.tolerance
+        if ll_change < -1e-4 * max(1.0, abs(log_likelihoods[-2])):
+            logger.warning(
+                "Log-likelihood decreased at iteration %d: %.6e", iteration, ll_change
+            )
+
+        relative_change = abs(ll_change) / max(1.0, abs(log_likelihoods[-1]))
+        return relative_change < self.tolerance
         
     def _compute_param_changes(
         self,

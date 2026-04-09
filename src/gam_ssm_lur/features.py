@@ -3,14 +3,17 @@ Feature Selection and Extraction for Land Use Regression.
 
 This module provides utilities for:
 1. Multi-stage feature selection (correlation, VIF, importance-based)
-2. Spatial feature extraction from OpenStreetMap data
-3. Traffic and satellite data processing
+2. Inverse distance transformation for proximity predictors
+3. Sparse cell filtering (OpenLUR-style)
+
 
 References
 ----------
 .. [1] Hoek, G., et al. (2008). A review of land-use regression models.
 .. [2] Lautenschlager, F., et al. (2020). OpenLUR: Off-the-shelf air pollution
        modeling with open features and machine learning.
+.. [3] Naughton, O., et al. (2018). A land use regression model for explaining
+       spatial variation in air pollution. Science of the Total Environment.
 """
 
 from __future__ import annotations
@@ -24,6 +27,173 @@ from numpy.typing import NDArray
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Inverse distance transformation
+# ---------------------------------------------------------------------------
+
+def inverse_distance_transform(
+    df: pd.DataFrame,
+    distance_cols: Optional[List[str]] = None,
+    add_squared: bool = True,
+    min_distance: float = 1.0,
+    drop_raw: bool = False,
+) -> pd.DataFrame:
+    """Transform raw distance columns to inverse-distance predictors.
+
+    Closer sources produce higher pollution, so 1/d is the physically
+    appropriate predictor form. The squared term 1/d² additionally captures
+    the sharp near-source concentration gradient that a linear 1/d term
+    under-predicts.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Feature DataFrame containing distance columns.
+    distance_cols : list of str, optional
+        Names of columns to transform. If None, all columns whose names
+        contain ``distance_to_`` are used.
+    add_squared : bool
+        If True, also add 1/d² columns. Default True.
+    min_distance : float
+        Floor applied before inversion to avoid division by zero.
+        Default 1.0 (metre).
+    drop_raw : bool
+        If True, remove the original distance columns after transformation.
+        Default False (keep both so the selector can decide).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with new ``*_inverse_distance`` (and optionally
+        ``*_inverse_distance_sq``) columns appended.
+
+    Examples
+    --------
+    >>> features = inverse_distance_transform(
+    ...     features,
+    ...     distance_cols=["distance_to_motorway", "distance_to_traffic_signals"],
+    ...     add_squared=True,
+    ... )
+    """
+    df = df.copy()
+
+    if distance_cols is None:
+        distance_cols = [c for c in df.columns if "distance_to_" in c]
+
+    for col in distance_cols:
+        if col not in df.columns:
+            logger.warning("Column '%s' not found — skipping inverse distance transform", col)
+            continue
+
+        # Derive a clean base name: strip "distance_to_" prefix if present
+        if col.startswith("distance_to_"):
+            base = col[len("distance_to_"):]
+        else:
+            base = col
+
+        d = df[col].clip(lower=min_distance)
+        inv_col = f"{base}_inverse_distance"
+        df[inv_col] = 1.0 / d
+
+        if add_squared:
+            sq_col = f"{base}_inverse_distance_sq"
+            df[sq_col] = 1.0 / (d ** 2)
+
+    if drop_raw:
+        df = df.drop(columns=[c for c in distance_cols if c in df.columns])
+
+    n_new = len(distance_cols) * (2 if add_squared else 1)
+    logger.info(
+        "inverse_distance_transform: added %d columns from %d distance cols",
+        n_new, len(distance_cols),
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Sparse cell filter
+# ---------------------------------------------------------------------------
+
+def filter_sparse_cells(
+    features: pd.DataFrame,
+    target: pd.Series,
+    min_nonzero_features: int = 1,
+    drop_zero_target: bool = True,
+    id_cols: Optional[List[str]] = None,
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """Remove grid cells with insufficient predictor information.
+
+    Inspired by the OpenLUR methodology (Lautenschlager et al., 2020), which
+    restricts model training to cells with sufficient observed feature coverage.
+    Cells with all-zero features contain no OSM or traffic information and
+    would bias the model toward the intercept.
+    
+    TODO: Might set this number to soecific figure in future..
+    OpenLUR used a threshold of rows with min 200 predictors
+
+    Parameters
+    ----------
+    features : pd.DataFrame
+        Feature matrix (may include non-predictor columns such as
+        ``grid_id``, ``latitude``, ``longitude``).
+    target : pd.Series
+        Target values aligned with ``features``.
+    min_nonzero_features : int
+        Minimum number of non-zero predictor columns a cell must have
+        to be retained. Default 1.
+    drop_zero_target : bool
+        If True, also remove rows where target == 0, which typically
+        indicate cells outside the modelled domain. Default True.
+    id_cols : list of str, optional
+        Column names to exclude from the non-zero count (e.g. ``grid_id``,
+        ``latitude``, ``longitude``). If None, defaults to
+        ``["grid_id", "latitude", "longitude"]``.
+
+    Returns
+    -------
+    features_filtered : pd.DataFrame
+        Filtered feature matrix.
+    target_filtered : pd.Series
+        Filtered target values.
+
+    Examples
+    --------
+    >>> X_clean, y_clean = filter_sparse_cells(X, y, min_nonzero_features=3)
+    """
+    if id_cols is None:
+        id_cols = ["grid_id", "latitude", "longitude"]
+
+    predictor_cols = [c for c in features.columns if c not in id_cols]
+    X_pred = features[predictor_cols].fillna(0)
+
+    mask = pd.Series(True, index=features.index)
+
+    if drop_zero_target:
+        zero_target = target.isna() | (target <= 0)
+        n_zero = zero_target.sum()
+        if n_zero:
+            logger.info("filter_sparse_cells: dropping %d zero/NaN target rows", n_zero)
+        mask &= ~zero_target
+
+    nonzero_count = (X_pred != 0).sum(axis=1)
+    sparse_mask = nonzero_count < min_nonzero_features
+    n_sparse = sparse_mask.sum()
+    if n_sparse:
+        logger.info(
+            "filter_sparse_cells: dropping %d cells with fewer than %d non-zero predictors",
+            n_sparse, min_nonzero_features,
+        )
+    mask &= ~sparse_mask
+
+    n_in = len(features)
+    n_out = mask.sum()
+    logger.info(
+        "filter_sparse_cells: %d → %d cells retained (%.1f%%)",
+        n_in, n_out, 100 * n_out / n_in,
+    )
+    return features[mask].reset_index(drop=True), target[mask].reset_index(drop=True)
 
 
 @dataclass
@@ -58,48 +228,57 @@ class SelectionResult:
 
 class FeatureSelector:
     """Multi-stage feature selection pipeline for LUR models.
+
+    Reviewer had a question about how features were selected for the final model. 
+
+    This class does just that. Has also added a flowchart in the manuscript to 
+    illustrate the process.
     
     Implements a three-stage pipeline:
     1. Correlation-based removal: Remove highly correlated features
     2. VIF filtering: Remove features with high variance inflation
-    3. Importance-based selection: Select top features by RF importance
-    
+    3. Importance-based selection: Keep the minimum set of features whose
+       cumulative RF importance reaches ``importance_threshold`` (default 0.95).
+       This is data-driven and reproducible — the number of selected features
+       emerges from the data rather than an arbitrary fixed count.
+
     Parameters
     ----------
     correlation_threshold : float
         Maximum allowed pairwise correlation (default 0.8)
     vif_threshold : float
         Maximum allowed VIF value (default 10.0)
-    n_top_features : int
-        Number of top features to select (default 30)
+    importance_threshold : float
+        Cumulative RF importance threshold (default 0.95). Features are ranked
+        by importance and the minimum set that accounts for this fraction of
+        total importance is retained.
     force_keep : List[str], optional
         Features to always keep regardless of selection criteria
     random_state : int, optional
         Random seed for reproducibility
-        
+
     Examples
     --------
     >>> selector = FeatureSelector(
     ...     correlation_threshold=0.8,
     ...     vif_threshold=10.0,
-    ...     n_top_features=30,
-    ...     force_keep=['traffic_volume', 'motorway_distance']
+    ...     importance_threshold=0.95,
     ... )
     >>> X_selected = selector.fit_transform(X, y)
     >>> print(f"Selected {selector.result_.n_selected} of {selector.result_.n_original} features")
     """
-    
+
     def __init__(
         self,
         correlation_threshold: float = 0.8,
         vif_threshold: float = 10.0,
-        n_top_features: int = 30,
+        importance_threshold: float = 0.95,
         force_keep: Optional[List[str]] = None,
         random_state: Optional[int] = None,
     ):
         self.correlation_threshold = correlation_threshold
         self.vif_threshold = vif_threshold
-        self.n_top_features = n_top_features
+        self.importance_threshold = importance_threshold
         self.force_keep = set(force_keep) if force_keep else set()
         self.random_state = random_state
         
@@ -210,7 +389,7 @@ class FeatureSelector:
             dropped_vif.append(feature_to_remove)
             X_current = X_current.drop(columns=[feature_to_remove])
             
-            if len(X_current.columns) <= self.n_top_features:
+            if len(X_current.columns) <= 5:  # safety floor
                 break
                 
         current_features = set(X_current.columns)
@@ -241,15 +420,33 @@ class FeatureSelector:
             'feature': X_current.columns,
             'importance': rf.feature_importances_,
         }).sort_values('importance', ascending=False)
-        
-        # Select top features + force-keep
-        top_features = set(importances.head(self.n_top_features)['feature'])
-        top_features |= self.force_keep & current_features
-        
+
+        # Cumulative importance threshold — keep the minimum set of features
+        # whose cumulative RF importance reaches importance_threshold.
+        # Defensible in publication: "features were retained until cumulative
+        # RF importance reached {threshold*100:.0f}% of total explained variance."
+        importances['cumulative'] = importances['importance'].cumsum()
+        total = importances['importance'].sum()
+        importances['cumulative_frac'] = importances['cumulative'] / total
+
+        # Find cutoff index (first row where cumulative fraction >= threshold)
+        cutoff = (importances['cumulative_frac'] >= self.importance_threshold).idxmax()
+        cutoff_pos = importances.index.get_loc(cutoff)
+        selected_by_threshold = set(importances.iloc[:cutoff_pos + 1]['feature'])
+
+        # Always include force-keep features
+        top_features = selected_by_threshold | (self.force_keep & current_features)
+
         dropped_imp = [f for f in current_features if f not in top_features]
         selected_features = list(top_features)
-        
-        logger.info(f"  Selected {len(selected_features)} features")
+
+        pct = importances.loc[importances['feature'].isin(selected_features),
+                              'importance'].sum() / total * 100
+        logger.info(
+            "  Selected %d features accounting for %.1f%% of total RF importance "
+            "(threshold=%.0f%%)",
+            len(selected_features), pct, self.importance_threshold * 100,
+        )
         
         # Store results
         self.selected_columns_ = selected_features
@@ -376,243 +573,3 @@ class FeatureSelector:
             
         return "\n".join(lines)
 
-
-class FeatureExtractor:
-    """Extract spatial features from OpenStreetMap and other sources.
-    
-    Provides utilities for computing LUR-style features:
-    - Road network density within buffers
-    - Land use composition
-    - Distance to features
-    - Traffic proximity
-    
-    Parameters
-    ----------
-    buffer_distances : List[int]
-        Buffer distances in meters for density calculations
-    road_types : List[str]
-        OSM road types to include
-    land_use_types : List[str]
-        OSM land use types to include
-        
-    Examples
-    --------
-    >>> extractor = FeatureExtractor(
-    ...     buffer_distances=[50, 100, 200, 500, 1000],
-    ...     road_types=['motorway', 'primary', 'secondary', 'tertiary'],
-    ... )
-    >>> features = extractor.extract(points_gdf, road_network_gdf, land_use_gdf)
-    """
-    
-    DEFAULT_BUFFER_DISTANCES = [50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000]
-    DEFAULT_ROAD_TYPES = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential']
-    DEFAULT_LAND_USE_TYPES = ['industrial', 'commercial', 'residential', 'retail']
-    
-    def __init__(
-        self,
-        buffer_distances: Optional[List[int]] = None,
-        road_types: Optional[List[str]] = None,
-        land_use_types: Optional[List[str]] = None,
-    ):
-        self.buffer_distances = buffer_distances or self.DEFAULT_BUFFER_DISTANCES
-        self.road_types = road_types or self.DEFAULT_ROAD_TYPES
-        self.land_use_types = land_use_types or self.DEFAULT_LAND_USE_TYPES
-        
-    def extract(
-        self,
-        points: "gpd.GeoDataFrame",
-        roads: Optional["gpd.GeoDataFrame"] = None,
-        land_use: Optional["gpd.GeoDataFrame"] = None,
-        traffic_points: Optional["gpd.GeoDataFrame"] = None,
-    ) -> pd.DataFrame:
-        """Extract features for given points.
-        
-        Parameters
-        ----------
-        points : GeoDataFrame
-            Points to extract features for
-        roads : GeoDataFrame, optional
-            Road network with 'highway' column for road type
-        land_use : GeoDataFrame, optional
-            Land use polygons with 'landuse' column
-        traffic_points : GeoDataFrame, optional
-            Traffic monitoring points
-            
-        Returns
-        -------
-        pd.DataFrame
-            Feature matrix with one row per point
-        """
-        try:
-            import geopandas as gpd
-            from shapely.geometry import Point
-        except ImportError:
-            raise ImportError("geopandas and shapely required for feature extraction")
-            
-        features = pd.DataFrame(index=points.index)
-        
-        # Road density features
-        if roads is not None:
-            logger.info("Extracting road network features")
-            road_features = self._extract_road_features(points, roads)
-            features = pd.concat([features, road_features], axis=1)
-            
-        # Land use features
-        if land_use is not None:
-            logger.info("Extracting land use features")
-            lu_features = self._extract_land_use_features(points, land_use)
-            features = pd.concat([features, lu_features], axis=1)
-            
-        # Traffic features
-        if traffic_points is not None:
-            logger.info("Extracting traffic features")
-            traffic_features = self._extract_traffic_features(points, traffic_points)
-            features = pd.concat([features, traffic_features], axis=1)
-            
-        return features
-        
-    def _extract_road_features(
-        self,
-        points: "gpd.GeoDataFrame",
-        roads: "gpd.GeoDataFrame",
-    ) -> pd.DataFrame:
-        """Extract road network density and distance features."""
-        import geopandas as gpd
-        
-        features = {}
-        
-        for road_type in self.road_types:
-            # Filter roads by type
-            if 'highway' in roads.columns:
-                roads_filtered = roads[roads['highway'] == road_type]
-            else:
-                roads_filtered = roads
-                
-            if len(roads_filtered) == 0:
-                continue
-                
-            # Distance to nearest road
-            dist_col = f"{road_type}_distance"
-            features[dist_col] = points.geometry.apply(
-                lambda p: roads_filtered.distance(p).min()
-            )
-            
-            # Road length within buffers
-            for buffer_dist in self.buffer_distances:
-                col_name = f"{road_type}_{buffer_dist}m"
-                
-                def calc_road_length(point, buffer_dist=buffer_dist):
-                    buffer = point.buffer(buffer_dist)
-                    clipped = gpd.clip(roads_filtered, buffer)
-                    return clipped.length.sum() if len(clipped) > 0 else 0
-                    
-                features[col_name] = points.geometry.apply(calc_road_length)
-                
-        return pd.DataFrame(features, index=points.index)
-        
-    def _extract_land_use_features(
-        self,
-        points: "gpd.GeoDataFrame",
-        land_use: "gpd.GeoDataFrame",
-    ) -> pd.DataFrame:
-        """Extract land use composition features."""
-        import geopandas as gpd
-        
-        features = {}
-        
-        for lu_type in self.land_use_types:
-            # Filter land use
-            if 'landuse' in land_use.columns:
-                lu_filtered = land_use[land_use['landuse'] == lu_type]
-            else:
-                lu_filtered = land_use
-                
-            if len(lu_filtered) == 0:
-                continue
-                
-            # Distance to nearest land use
-            dist_col = f"{lu_type}_distance"
-            features[dist_col] = points.geometry.apply(
-                lambda p: lu_filtered.distance(p).min() if len(lu_filtered) > 0 else np.inf
-            )
-            
-            # Area within buffers
-            for buffer_dist in self.buffer_distances[:6]:  # Use smaller set for land use
-                col_name = f"{lu_type}_{buffer_dist}m"
-                
-                def calc_area(point, buffer_dist=buffer_dist):
-                    buffer = point.buffer(buffer_dist)
-                    clipped = gpd.clip(lu_filtered, buffer)
-                    return clipped.area.sum() if len(clipped) > 0 else 0
-                    
-                features[col_name] = points.geometry.apply(calc_area)
-                
-        return pd.DataFrame(features, index=points.index)
-        
-    def _extract_traffic_features(
-        self,
-        points: "gpd.GeoDataFrame",
-        traffic_points: "gpd.GeoDataFrame",
-    ) -> pd.DataFrame:
-        """Extract traffic-related features."""
-        features = {}
-        
-        # Distance to nearest traffic monitoring point
-        features['traffic_distance'] = points.geometry.apply(
-            lambda p: traffic_points.distance(p).min()
-        )
-        
-        # Find nearest traffic point for each location
-        nearest_idx = points.geometry.apply(
-            lambda p: traffic_points.distance(p).idxmin()
-        )
-        features['nearest_traffic_id'] = nearest_idx
-        
-        return pd.DataFrame(features, index=points.index)
-        
-    @staticmethod
-    def from_osm(
-        bbox: Tuple[float, float, float, float],
-        buffer_distances: Optional[List[int]] = None,
-    ) -> Tuple["FeatureExtractor", "gpd.GeoDataFrame", "gpd.GeoDataFrame"]:
-        """Create extractor and download data from OpenStreetMap.
-        
-        Parameters
-        ----------
-        bbox : tuple
-            Bounding box as (west, south, east, north)
-        buffer_distances : list of int, optional
-            Buffer distances for feature extraction
-            
-        Returns
-        -------
-        extractor : FeatureExtractor
-            Configured feature extractor
-        roads : GeoDataFrame
-            Road network
-        land_use : GeoDataFrame
-            Land use polygons
-        """
-        try:
-            import osmnx as ox
-        except ImportError:
-            raise ImportError("osmnx required for OSM data download. Install with: pip install osmnx")
-            
-        logger.info(f"Downloading OSM data for bbox: {bbox}")
-        
-        # Download road network
-        west, south, east, north = bbox
-        roads = ox.features_from_bbox(
-            north=north, south=south, east=east, west=west,
-            tags={'highway': True}
-        )
-        
-        # Download land use
-        land_use = ox.features_from_bbox(
-            north=north, south=south, east=east, west=west,
-            tags={'landuse': True}
-        )
-        
-        extractor = FeatureExtractor(buffer_distances=buffer_distances)
-        
-        return extractor, roads, land_use

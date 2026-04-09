@@ -30,7 +30,12 @@ from gam_ssm_lur.models import (
 from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, EMEstimator
 
 # Utilities
-from gam_ssm_lur.features import FeatureSelector, FeatureExtractor
+from gam_ssm_lur.features import (
+    FeatureSelector,
+    inverse_distance_transform,
+    filter_sparse_cells,
+)
+from gam_ssm_lur.data import SpatiotemporalDataset, StaticData, TemporalData, CalibrationResult
 from gam_ssm_lur.evaluation import ModelEvaluator
 from gam_ssm_lur.visualization import (
     SpatialVisualizer,
@@ -56,7 +61,13 @@ __all__ = [
     # Utilities
     "utils",
     "FeatureSelector",
-    "FeatureExtractor",
+    "inverse_distance_transform",
+    "filter_sparse_cells",
+    # Data loading
+    "SpatiotemporalDataset",
+    "StaticData",
+    "TemporalData",
+    "CalibrationResult",
     "ModelEvaluator",
     # Visualization
     "SpatialVisualizer",

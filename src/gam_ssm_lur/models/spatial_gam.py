@@ -383,15 +383,16 @@ class SpatialGAM(BaseEstimator):
         grid = np.linspace(feature_values.min(), feature_values.max(), grid_size)
         
         # Compute partial dependence using pygam
+        # partial_dependence returns (pdep, confi) where confi has shape (n, 2)
         XX = self.gam_.generate_X_grid(term=feature_idx, n=grid_size)
-        pdep = self.gam_.partial_dependence(term=feature_idx, X=XX, width=confidence_level)
-        
+        pdep, confi = self.gam_.partial_dependence(term=feature_idx, X=XX, width=confidence_level)
+
         return PartialDependence(
             feature_name=self.feature_names_[feature_idx],
-            grid=grid,
-            response=pdep[:, 0],
-            confidence_lower=pdep[:, 1],
-            confidence_upper=pdep[:, 2],
+            grid=XX[:, feature_idx],
+            response=pdep,
+            confidence_lower=confi[:, 0],
+            confidence_upper=confi[:, 1],
         )
         
     def get_feature_importance(self) -> pd.DataFrame:

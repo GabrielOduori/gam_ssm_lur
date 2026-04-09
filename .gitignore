@@ -23,7 +23,8 @@ test_model_performance*
 FINAL_IMPLEMENTATION_SUMMARY*
 
 
-
+*.R
+archive/
 profile.out
 data/
 outputs/*
@@ -238,3 +239,5 @@ secrets.json
 # Presentations and talks
 presentations_talks/
 talks/
+# Local OSM tile cache (not for git)
+outputs/osm_cache/
