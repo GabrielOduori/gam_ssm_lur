@@ -79,6 +79,8 @@ class SSMDiagnostics:
         Trace of Q matrix
     observation_noise_variance : float
         Trace of H matrix
+    forcing_coefficients : NDArray or None
+        Estimated B matrix (n_locations, n_forcing), or None if no forcing.
     """
     log_likelihood: float
     aic: float
@@ -88,16 +90,25 @@ class SSMDiagnostics:
     transition_eigenvalues: NDArray
     process_noise_variance: float
     observation_noise_variance: float
+    forcing_coefficients: Optional[NDArray] = None
 
 
 class StateSpaceModel:
     """State Space Model for temporal dynamics in spatiotemporal pollution data.
-    
-    Implements a linear Gaussian state space model:
-    
-        Measurement: y_t = Z α_t + ε_t,  ε_t ~ N(0, H)
-        Transition:  α_{t+1} = T α_t + R η_t,  η_t ~ N(0, Q)
-    
+
+    Implements a linear Gaussian state space model with optional external forcing:
+
+        Measurement: y_t = Z α_t + ε_t,          ε_t ~ N(0, H)
+        Transition:  α_{t+1} = T α_t + B u_t + R η_t,  η_t ~ N(0, Q)
+
+    where u_t is a vector of external forcing covariates at time t (e.g. a
+    city-wide traffic anomaly and a spatially varying wind forcing scalar).
+    B is the forcing coefficient matrix, estimated by OLS from the forcing
+    signals and the GAM residuals prior to running the EM algorithm.
+
+    If no forcing matrix is supplied the model reduces to the standard
+    AR-1 state space model (B = 0).
+
     Parameters are estimated via Expectation-Maximisation, and inference
     is performed using Kalman filtering (forward) and RTS smoothing (backward).
     
@@ -121,6 +132,9 @@ class StateSpaceModel:
         Whether to estimate observation noise covariance
     diagonal_covariances : bool
         Constrain Q and H to be diagonal
+    forcing_coefficients : array-like of shape (n_locations, n_forcing), optional
+        Pre-specified forcing coefficient matrix B. If None and a
+        forcing_matrix is passed to fit(), B is estimated by OLS.
     random_state : int, optional
         Random seed for reproducibility
         
@@ -152,13 +166,14 @@ class StateSpaceModel:
         self,
         state_dim: Optional[int] = None,
         em_max_iter: int = 50,
-        em_tol: float = 1e-6,
+        em_tol: float = 1e-4,
         scalability_mode: Literal["auto", "dense", "diagonal", "block"] = "auto",
         regularization: float = 1e-6,
         estimate_T: bool = True,
         estimate_Q: bool = True,
         estimate_H: bool = True,
-        diagonal_covariances: bool = False,
+        diagonal_covariances: bool = True,
+        forcing_coefficients: Optional[NDArray] = None,
         random_state: Optional[int] = None,
     ):
         self.state_dim = state_dim
@@ -170,21 +185,24 @@ class StateSpaceModel:
         self.estimate_Q = estimate_Q
         self.estimate_H = estimate_H
         self.diagonal_covariances = diagonal_covariances
+        self.forcing_coefficients = forcing_coefficients
         self.random_state = random_state
-        
+
         # Fitted attributes
         self.T_: Optional[NDArray] = None
         self.Z_: Optional[NDArray] = None
         self.Q_: Optional[NDArray] = None
         self.H_: Optional[NDArray] = None
+        self.B_: Optional[NDArray] = None      # forcing coefficient matrix (n_locs, n_forcing)
         self.initial_mean_: Optional[NDArray] = None
         self.initial_cov_: Optional[NDArray] = None
-        
+
         self.em_result_: Optional[EMResult] = None
         self.kf_: Optional[KalmanFilter] = None
         self.filter_result_: Optional[FilterResult] = None
         self.smoother_result_: Optional[SmootherResult] = None
-        
+        self._forcing_matrix: Optional[NDArray] = None   # stored for forecast()
+
         self.is_fitted_ = False
         self._obs_dim: Optional[int] = None
         self._T_len: Optional[int] = None
@@ -192,45 +210,99 @@ class StateSpaceModel:
     def fit(
         self,
         observations: Union[NDArray, pd.DataFrame],
+        forcing_matrix: Optional[Union[NDArray, pd.DataFrame]] = None,
         T_init: Optional[NDArray] = None,
         Q_init: Optional[NDArray] = None,
         H_init: Optional[NDArray] = None,
     ) -> "StateSpaceModel":
         """Fit state space model parameters using EM algorithm.
-        
+
         Parameters
         ----------
         observations : array-like of shape (T, n_locations)
-            Observation matrix (typically residuals from spatial model)
+            Observation matrix (typically GAM residuals per grid cell).
+        forcing_matrix : array-like of shape (T, n_forcing), optional
+            External forcing covariates entering the transition equation::
+
+                α_{t+1} = T α_t + B u_t + R η_t
+
+            Each column is one covariate (e.g. daily traffic anomaly,
+            city-wide wind index). B is estimated by OLS from the
+            forcing signals and the residual observations before EM.
+            If None, no external forcing is applied (B = 0).
         T_init : NDArray, optional
-            Initial transition matrix
+            Initial transition matrix.
         Q_init : NDArray, optional
-            Initial process noise covariance
+            Initial process noise covariance.
         H_init : NDArray, optional
-            Initial observation noise covariance
-            
+            Initial observation noise covariance.
+
         Returns
         -------
         self : StateSpaceModel
-            Fitted model
+            Fitted model.
         """
         if self.random_state is not None:
             np.random.seed(self.random_state)
-            
-        # Convert to numpy
+
+        # Convert observations
         if isinstance(observations, pd.DataFrame):
             observations = observations.values
         observations = np.asarray(observations)
-        
+
         self._T_len, self._obs_dim = observations.shape
         state_dim = self.state_dim or self._obs_dim
+
+        # ── Handle external forcing ──────────────────────────────────────────
+        if forcing_matrix is not None:
+            if isinstance(forcing_matrix, pd.DataFrame):
+                forcing_matrix = forcing_matrix.values
+            forcing_matrix = np.asarray(forcing_matrix, dtype=float)
+            if forcing_matrix.shape[0] != self._T_len:
+                raise ValueError(
+                    f"forcing_matrix has {forcing_matrix.shape[0]} rows but "
+                    f"observations has {self._T_len} time steps."
+                )
+            self._forcing_matrix = forcing_matrix
+
+            # Estimate B via OLS: obs_t ≈ B u_t  (mean across locations)
+            if self.forcing_coefficients is not None:
+                self.B_ = np.asarray(self.forcing_coefficients)
+            else:
+                # OLS on mean anomaly: shape (T,) ~ (T, n_forcing)
+                obs_mean = np.nanmean(observations, axis=1, keepdims=True)  # (T,1)
+                U = forcing_matrix  # (T, n_forcing)
+                U_aug = np.column_stack([np.ones(self._T_len), U])
+                coeffs, _, _, _ = np.linalg.lstsq(U_aug, obs_mean, rcond=None)
+                # coeffs shape (n_forcing+1, 1); skip intercept, broadcast to (n_locs, n_forcing)
+                b_vec = coeffs[1:, 0]  # (n_forcing,)
+                self.B_ = np.tile(b_vec, (self._obs_dim, 1))  # (n_locs, n_forcing)
+                logger.info(
+                    "Forcing coefficients estimated by OLS: %s",
+                    np.round(b_vec, 4),
+                )
+
+            # Remove forcing signal from observations before EM
+            # so EM sees only the AR residual
+            forcing_mean = (forcing_matrix @ self.B_.T).T  # (n_locs, T) → transpose → (T, n_locs)
+            # Actually: B_ is (n_locs, n_forcing), u_t is (n_forcing,)
+            # forcing contribution at t: B_ @ u_t → (n_locs,)
+            forcing_contrib = np.stack(
+                [self.B_ @ forcing_matrix[t] for t in range(self._T_len)]
+            )  # (T, n_locs)
+            observations_deforced = observations - forcing_contrib
+        else:
+            self._forcing_matrix = None
+            self.B_ = None
+            observations_deforced = observations
         
         logger.info(
-            f"Fitting SSM: T={self._T_len}, obs_dim={self._obs_dim}, "
-            f"state_dim={state_dim}, mode={self.scalability_mode}"
+            "Fitting SSM: T=%d, obs_dim=%d, state_dim=%d, mode=%s, forcing=%s",
+            self._T_len, self._obs_dim, state_dim, self.scalability_mode,
+            "yes" if self._forcing_matrix is not None else "no",
         )
-        
-        # Create EM estimator
+
+        # Create EM estimator — fit on de-forced observations
         em = EMEstimator(
             max_iterations=self.em_max_iter,
             tolerance=self.em_tol,
@@ -242,10 +314,9 @@ class StateSpaceModel:
             diagonal_H=self.diagonal_covariances,
             verbose=True,
         )
-        
-        # Fit using EM
+
         self.em_result_ = em.fit(
-            observations=observations,
+            observations=observations_deforced,
             state_dim=state_dim,
             obs_dim=self._obs_dim,
             T_init=T_init,
@@ -253,15 +324,15 @@ class StateSpaceModel:
             H_init=H_init,
             scalability_mode=self.scalability_mode,
         )
-        
+
         # Store estimated parameters
         self.T_ = self.em_result_.T
-        self.Z_ = np.eye(self._obs_dim, state_dim)  # Identity observation matrix
+        self.Z_ = np.eye(self._obs_dim, state_dim)
         self.Q_ = self.em_result_.Q
         self.H_ = self.em_result_.H
         self.initial_mean_ = self.em_result_.initial_mean
         self.initial_cov_ = self.em_result_.initial_covariance
-        
+
         # Create Kalman filter with estimated parameters
         self.kf_ = KalmanFilter(
             state_dim=state_dim,
@@ -277,9 +348,9 @@ class StateSpaceModel:
             initial_mean=self.initial_mean_,
             initial_covariance=self.initial_cov_,
         )
-        
-        # Run final filter and smoother
-        self.filter_result_ = self.kf_.filter(observations)
+
+        # Run final filter and smoother on de-forced observations
+        self.filter_result_ = self.kf_.filter(observations_deforced)
         smoother = RTSSmoother(self.kf_)
         self.smoother_result_ = smoother.smooth(self.filter_result_)
         
@@ -435,6 +506,7 @@ class StateSpaceModel:
             transition_eigenvalues=eigenvalues,
             process_noise_variance=np.trace(self.Q_),
             observation_noise_variance=np.trace(self.H_),
+            forcing_coefficients=self.B_,
         )
         
     def get_em_history(self) -> pd.DataFrame:
@@ -604,6 +676,22 @@ class StateSpaceModel:
         model._obs_dim = data['fitted']['obs_dim']
         model._T_len = data['fitted']['T_len']
         model.is_fitted_ = True
-        
+
+        if 'em_result' in data:
+            from gam_ssm_lur.inference.em import EMResult
+            er = data['em_result']
+            model.em_result_ = EMResult(
+                T=model.T_,
+                Q=model.Q_,
+                H=model.H_,
+                initial_mean=model.initial_mean_,
+                initial_covariance=model.initial_cov_,
+                log_likelihoods=er['log_likelihoods'],
+                n_iterations=er['n_iterations'],
+                converged=er['converged'],
+                smoothed_states=None,
+                smoothed_covariances=None,
+            )
+
         logger.info(f"SSM loaded from {filepath}")
         return model

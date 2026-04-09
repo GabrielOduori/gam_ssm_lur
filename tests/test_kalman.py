@@ -20,15 +20,20 @@ class TestKalmanFilter:
         assert not kf._initialized
         
     def test_auto_mode_selection(self):
-        """Test automatic mode selection based on problem size."""
-        # Small problem -> dense
-        kf_small = KalmanFilter(state_dim=100, obs_dim=100, mode='auto')
-        assert kf_small.mode == 'dense'
-        
-        # Medium problem -> diagonal
-        kf_medium = KalmanFilter(state_dim=2000, obs_dim=2000, mode='auto')
+        """Test automatic mode selection based on problem size.
+
+        Thresholds: DENSE_THRESHOLD=10, DIAGONAL_THRESHOLD=5000
+        Spatial SSMs typically have state_dim = n_locations (tens to thousands),
+        so 'auto' defaults to diagonal to keep the EM problem well-posed.
+        """
+        # Tiny toy problem -> dense
+        kf_tiny = KalmanFilter(state_dim=5, obs_dim=5, mode='auto')
+        assert kf_tiny.mode == 'dense'
+
+        # Typical spatial grid -> diagonal
+        kf_medium = KalmanFilter(state_dim=100, obs_dim=100, mode='auto')
         assert kf_medium.mode == 'diagonal'
-        
+
         # Large problem -> block
         kf_large = KalmanFilter(state_dim=6000, obs_dim=6000, mode='auto')
         assert kf_large.mode == 'block'

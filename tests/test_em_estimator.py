@@ -5,7 +5,7 @@ Tests for EM parameter estimation.
 import numpy as np
 import pytest
 
-from gam_ssm_lur.em_estimator import EMEstimator, EMResult
+from gam_ssm_lur.inference.em import EMEstimator, EMResult
 
 
 class TestEMEstimator:

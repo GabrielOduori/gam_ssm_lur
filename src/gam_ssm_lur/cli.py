@@ -34,38 +34,46 @@ def train() -> None:
         description='Train a hybrid GAM-SSM model for air pollution prediction',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    
-    # Data arguments
+
+    # ── Data directory (standard contract) ───────────────────────────────────
     parser.add_argument(
-        '--features', '-f',
+        '--data-dir', '-d',
         type=str,
         required=True,
-        help='Path to CSV file with spatial features',
+        help=(
+            'Root data directory containing features.csv, target.csv and a '
+            'time_series/ sub-directory with temporal data files.'
+        ),
     )
-    parser.add_argument(
-        '--targets', '-t',
-        type=str,
-        required=True,
-        help='Path to CSV file with target values (NO2 concentrations)',
-    )
-    parser.add_argument(
-        '--time-column',
-        type=str,
-        default='timestamp',
-        help='Name of time column in targets file',
-    )
-    parser.add_argument(
-        '--location-column',
-        type=str,
-        default='location_id',
-        help='Name of location column in targets file',
-    )
-    parser.add_argument(
-        '--target-column',
-        type=str,
-        default='no2',
-        help='Name of target column in targets file',
-    )
+
+    # ── Column / file name overrides (all have Dublin defaults) ──────────────
+    parser.add_argument('--target-col', default='atmos_no2',
+                        help='Target column name in target.csv')
+    parser.add_argument('--dense-obs-file', default='satellite_retreavals.csv',
+                        help='Dense gridded observation file (Kalman update source)')
+    parser.add_argument('--dense-obs-value-col', default='tropomi_no2',
+                        help='Value column in dense obs file')
+    parser.add_argument('--dense-obs-timestamp-col', default='timestamp',
+                        help='Timestamp column in dense obs file')
+    parser.add_argument('--point-obs-file', default='epa_timeseries.csv',
+                        help='Point observation file (validation only)')
+    parser.add_argument('--point-obs-value-col', default='epa_no2',
+                        help='Value column in point obs file')
+    parser.add_argument('--point-obs-timestamp-col', default='timestamp_utc',
+                        help='Timestamp column in point obs file')
+    parser.add_argument('--activity-file', default='traffic_timeseries.csv',
+                        help='Activity forcing file (city-wide transition covariate)')
+    parser.add_argument('--activity-value-col', default='traffic_volume',
+                        help='Volume column in activity file')
+    parser.add_argument('--activity-timestamp-col', default='traffic_end_time',
+                        help='Timestamp column in activity file')
+    parser.add_argument('--met-forcing-file',
+                        default='wind_sector_features_era5land_2023-06_daily.csv',
+                        help='Meteorological forcing file')
+    parser.add_argument('--met-n-sectors', type=int, default=8,
+                        help='Number of sectors in met forcing file')
+    parser.add_argument('--grid-geojson', default='grid.geojson',
+                        help='Grid polygon GeoJSON (relative to data-dir, optional)')
     
     # Model arguments
     parser.add_argument(
@@ -148,33 +156,65 @@ def train() -> None:
     args = parser.parse_args()
     setup_logging(args.verbose)
     logger = logging.getLogger(__name__)
-    
+
     logger.info("Starting GAM-SSM training pipeline")
-    
+
     # Import here to avoid slow imports for --help
     from gam_ssm_lur import HybridGAMSSM, FeatureSelector, ModelEvaluator
-    
-    # Load data
-    logger.info(f"Loading features from {args.features}")
-    features_df = pd.read_csv(args.features)
-    
-    logger.info(f"Loading targets from {args.targets}")
-    targets_df = pd.read_csv(args.targets)
-    
-    # Extract arrays
-    X = features_df.values
-    feature_names = list(features_df.columns)
-    y = targets_df[args.target_column].values
-    time_index = targets_df[args.time_column].values
-    
-    location_index = None
-    if args.location_column in targets_df.columns:
-        location_index = targets_df[args.location_column].values
-        
-    logger.info(f"Data loaded: {len(y)} observations, {X.shape[1]} features")
-    
-    # Feature selection
+    from gam_ssm_lur.data import SpatiotemporalDataset
+    from gam_ssm_lur.features import inverse_distance_transform, filter_sparse_cells
+
+    # ── Load data ─────────────────────────────────────────────────────────────
+    ds = SpatiotemporalDataset(
+        data_dir=args.data_dir,
+        target_col=args.target_col,
+        dense_obs_file=args.dense_obs_file,
+        dense_obs_value_col=args.dense_obs_value_col,
+        dense_obs_timestamp_col=args.dense_obs_timestamp_col,
+        point_obs_file=args.point_obs_file,
+        point_obs_value_col=args.point_obs_value_col,
+        point_obs_timestamp_col=args.point_obs_timestamp_col,
+        activity_file=args.activity_file,
+        activity_value_col=args.activity_value_col,
+        activity_timestamp_col=args.activity_timestamp_col,
+        met_forcing_file=args.met_forcing_file,
+        met_n_sectors=args.met_n_sectors,
+        grid_geojson=args.grid_geojson,
+    )
+
+    logger.info("Loading static data...")
+    static = ds.load_static()
+
+    logger.info("Loading temporal data...")
+    temporal = ds.load_temporal()
+
+    logger.info("Calibrating dense observations against point observations...")
+    calibration = ds.calibrate_dense_obs(temporal, static)
+
+    # ── Feature engineering ───────────────────────────────────────────────────
+    id_cols = ["grid_id", "latitude", "longitude"]
+    features_df = inverse_distance_transform(static.features)
+
+    target_merged = static.features[["grid_id"]].merge(
+        static.target[["grid_id", args.target_col]], on="grid_id", how="left"
+    )
+    y_full = target_merged[args.target_col]
+
+    feat_cols = [c for c in features_df.columns if c not in id_cols]
+    X_df = features_df[feat_cols]
+
     if not args.skip_feature_selection:
+        logger.info("Filtering sparse cells...")
+        X_df, y_full = filter_sparse_cells(
+            X_df.assign(**{c: features_df[c] for c in id_cols}),
+            y_full,
+            min_nonzero_features=args.min_nonzero_features if hasattr(args, 'min_nonzero_features') else 1,
+            id_cols=id_cols,
+        )
+        # Re-extract after filter
+        feat_cols = [c for c in X_df.columns if c not in id_cols]
+        X_df = X_df[feat_cols]
+
         logger.info("Running feature selection...")
         selector = FeatureSelector(
             correlation_threshold=args.corr_threshold,
@@ -182,12 +222,10 @@ def train() -> None:
             n_top_features=args.n_features,
             random_state=args.random_state,
         )
-        X_selected = selector.fit_transform(X, y, feature_names=feature_names)
-        feature_names = selector.selected_columns_
-        X = X_selected.values
-        logger.info(f"Selected {len(feature_names)} features")
-    
-    # Train model
+        X_df = selector.fit_transform(X_df, y_full)
+        logger.info("Selected %d features", len(X_df.columns))
+
+    # ── Train model ───────────────────────────────────────────────────────────
     logger.info("Training hybrid GAM-SSM model...")
     model = HybridGAMSSM(
         n_splines=args.n_splines,
@@ -196,53 +234,39 @@ def train() -> None:
         scalability_mode=args.scalability_mode,
         random_state=args.random_state,
     )
-    
-    model.fit(
-        X=X,
-        y=y,
-        time_index=time_index,
-        location_index=location_index,
-        feature_names=feature_names,
+
+    model.fit_from_dataset(
+        static=static,
+        temporal=temporal,
+        calibration=calibration,
     )
-    
-    # Save model
+
+    # ── Save ──────────────────────────────────────────────────────────────────
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     model.save(output_dir / "model")
-    logger.info(f"Model saved to {output_dir / 'model'}")
-    
-    # Evaluate and save results
-    predictions = model.predict()
+    logger.info("Model saved to %s", output_dir / "model")
+
+    # ── Evaluate ──────────────────────────────────────────────────────────────
     evaluator = ModelEvaluator(model)
-    
-    # Save metrics
-    y_matrix = model._y_matrix
-    metrics = evaluator.compute_accuracy(y_matrix.flatten(), predictions.total.flatten())
-    
-    metrics_df = pd.DataFrame([metrics.to_dict()])
-    metrics_df.to_csv(output_dir / "metrics.csv", index=False)
-    logger.info(f"Metrics saved to {output_dir / 'metrics.csv'}")
-    
-    # Save diagnostics
+
+    if model._residual_matrix is not None:
+        ssm_pred = model.ssm_.predict()
+        lur_pred = model.gam_.predict(model._X_train)
+        total_pred = lur_pred[:, np.newaxis] + ssm_pred.mean  # broadcast (n,) + (T,n)
+
+        metrics = evaluator.compute_accuracy(
+            model._y_train,
+            lur_pred,
+        )
+        metrics_df = pd.DataFrame([metrics.to_dict()])
+        metrics_df.to_csv(output_dir / "metrics.csv", index=False)
+        logger.info("GAM metrics saved to %s", output_dir / "metrics.csv")
+
     if args.save_diagnostics:
-        evaluator.diagnostic_plots(
-            y_true=y_matrix.flatten(),
-            y_pred=predictions.total.flatten(),
-            y_std=predictions.std.flatten(),
-            save_path=output_dir / "diagnostics.png",
-        )
-        evaluator.convergence_plot(
-            save_path=output_dir / "convergence.png",
-        )
-        
-    # Print summary
-    evaluator.summary_report(
-        y_true=y_matrix.flatten(),
-        y_pred=predictions.total.flatten(),
-        y_std=predictions.std.flatten(),
-    )
-    
+        evaluator.convergence_plot(save_path=output_dir / "convergence.png")
+
     logger.info("Training complete!")
     
 

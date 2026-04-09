@@ -140,9 +140,12 @@ class KalmanFilter:
     >>> result = kf.filter(observations)
     """
     
-    # Thresholds for automatic mode selection
-    DENSE_THRESHOLD = 1000
-    DIAGONAL_THRESHOLD = 5000
+    # Thresholds for automatic mode selection.
+    # For spatial SSMs the state_dim = n_locations. Dense mode fits
+    # n²×3 parameters via EM which is underdetermined even for ~50 cells,
+    # so 'auto' defaults to diagonal for all realistic spatial grids.
+    DENSE_THRESHOLD = 10       # only use dense for toy problems
+    DIAGONAL_THRESHOLD = 5000  # diagonal → block for very large grids
     
     def __init__(
         self,

@@ -34,6 +34,7 @@ import pandas as pd
 
 from gam_ssm_lur.models.spatial_gam import SpatialGAM, GAMSummary
 from gam_ssm_lur.models.state_space import StateSpaceModel, SSMPrediction, SSMDiagnostics
+from gam_ssm_lur.data import SpatiotemporalDataset, StaticData, TemporalData, CalibrationResult
 
 
 logger = logging.getLogger(__name__)
@@ -153,9 +154,9 @@ class HybridGAMSSM:
         self,
         n_splines: int = 10,
         gam_lam: Union[float, Literal["auto"]] = "auto",
-        state_dim: Optional[int] = None,
+        state_dim: int = 3,
         em_max_iter: int = 50,
-        em_tol: float = 1e-6,
+        em_tol: float = 1e-4,
         scalability_mode: Literal["auto", "dense", "diagonal", "block"] = "auto",
         regularization: float = 1e-6,
         confidence_level: float = 0.95,
@@ -186,6 +187,12 @@ class HybridGAMSSM:
         self._y_train: Optional[NDArray] = None
         self._y_matrix: Optional[NDArray] = None  # Reshaped as (T, n_locations)
         self._residual_matrix: Optional[NDArray] = None  # GAM residuals reshaped
+        self._residual_offset: float = 0.0               # mean offset removed before SVD
+        self._location_index_train: Optional[NDArray] = None
+        self._time_index_train: Optional[NDArray] = None
+
+        # Spatial loading matrix: maps (state_dim,) temporal state → (n_locations,)
+        self.Z_spatial_: Optional[NDArray] = None
         
         self.is_fitted_ = False
         
@@ -286,18 +293,25 @@ class HybridGAMSSM:
         logger.info(f"Residual matrix shape: {residual_matrix.shape}")
         self._residual_matrix = residual_matrix
         
-        # Step 2: Fit SSM on residuals
+        # Step 2: Project residuals to low-dimensional factors via SVD,
+        # then fit SSM on the projected temporal scores.
         logger.info("Step 2: Fitting SSM on GAM residuals")
+        residual_filled = np.where(np.isnan(residual_matrix), 0.0, residual_matrix)
+        U, s, Vt = np.linalg.svd(residual_filled, full_matrices=False)
+        k = min(self.state_dim, len(s))
+        obs_projected = U[:, :k] * s[:k]       # (T, k)
+        self.Z_spatial_ = Vt[:k, :].T          # (n_locations, k)
+
         self.ssm_ = StateSpaceModel(
-            state_dim=self.state_dim,
+            state_dim=k,
             em_max_iter=self.em_max_iter,
             em_tol=self.em_tol,
             scalability_mode=self.scalability_mode,
             regularization=self.regularization,
             random_state=self.random_state,
         )
-        self.ssm_.fit(residual_matrix)
-        
+        self.ssm_.fit(obs_projected)
+
         self.is_fitted_ = True
         
         # Log final performance
@@ -312,6 +326,194 @@ class HybridGAMSSM:
         
         return self
         
+    def fit_from_dataset(
+        self,
+        static: "StaticData",
+        temporal: "TemporalData",
+        calibration: Optional["CalibrationResult"] = None,
+        feature_selector: Optional[object] = None,
+        id_cols: Optional[List[str]] = None,
+        target_col: str = "atmos_no2",
+    ) -> "HybridGAMSSM":
+        """Fit the hybrid model from a loaded :class:`SpatiotemporalDataset`.
+
+        This is the high-level entry point when using the standard Dublin-style
+        data contract. It handles:
+
+        1. Feature preparation (dropping id columns, applying selector if given).
+        2. Static GAM-LUR fitting on the spatial features and target.
+        3. Building the forcing matrix from activity anomaly and met forcing.
+        4. SSM fitting on the GAM residuals with external forcing.
+
+        The dense gridded observations (e.g. satellite) and the calibration
+        coefficients are stored and used by :meth:`predict` for Kalman updates.
+        Point observations (e.g. EPA stations) are stored for validation only.
+
+        Parameters
+        ----------
+        static : StaticData
+            Output of :meth:`SpatiotemporalDataset.load_static`.
+        temporal : TemporalData
+            Output of :meth:`SpatiotemporalDataset.load_temporal`.
+        calibration : CalibrationResult, optional
+            Output of :meth:`SpatiotemporalDataset.calibrate_dense_obs`.
+            If None, dense observations enter the filter uncalibrated.
+        feature_selector : FeatureSelector, optional
+            Pre-fitted or to-be-fitted feature selector. If None, all
+            non-id columns from ``static.features`` are used.
+        id_cols : list of str, optional
+            Columns to exclude from the feature matrix.
+            Default: ``["grid_id", "latitude", "longitude"]``.
+        target_col : str
+            Name of the target column in ``static.target``.
+            Default ``atmos_no2``.
+
+        Returns
+        -------
+        self : HybridGAMSSM
+            Fitted model.
+        """
+        from gam_ssm_lur.features import FeatureSelector
+
+        if id_cols is None:
+            id_cols = ["grid_id", "latitude", "longitude"]
+
+        # ── Prepare feature matrix ───────────────────────────────────────────
+        feat_cols = [c for c in static.features.columns if c not in id_cols]
+        X_df = static.features[feat_cols]
+
+        # Align target with features on grid_id
+        target_merged = static.features[["grid_id"]].merge(
+            static.target[["grid_id", target_col]], on="grid_id", how="left"
+        )
+        y = target_merged[target_col].values
+
+        if feature_selector is not None:
+            if not getattr(feature_selector, "_is_fitted", False):
+                X_df = feature_selector.fit_transform(X_df, y)
+            else:
+                X_df = feature_selector.transform(X_df)
+
+        X = X_df.values
+        feature_names = list(X_df.columns)
+
+        # ── Build forcing matrix (T, n_forcing) ─────────────────────────────
+        dates = temporal.dates
+        T = len(dates)
+
+        # Activity forcing: city-wide scalar per day → shape (T, 1)
+        act_map = dict(
+            zip(temporal.activity_forcing["date"],
+                temporal.activity_forcing["delta_activity"])
+        )
+        activity_vec = np.array([act_map.get(d, 0.0) for d in dates])  # (T,)
+
+        # Met forcing: per-cell per-day → aggregate to city mean for SSM
+        # (cell-level spatial variation captured in B_ via OLS)
+        if "grid_id" in temporal.met_forcing.columns:
+            met_pivot = temporal.met_forcing.pivot(
+                index="date", columns="grid_id", values="met_forcing"
+            )
+            met_mean = met_pivot.reindex(dates).mean(axis=1).fillna(0.0).values  # (T,)
+        else:
+            met_map = temporal.met_forcing.set_index("date")["met_forcing"].to_dict()
+            met_mean = np.array([met_map.get(d, 0.0) for d in dates])  # (T,)
+
+        forcing_matrix = np.column_stack([activity_vec, met_mean])  # (T, 2)
+
+        # Store for later use (calibration, validation)
+        self._calibration = calibration
+        self._temporal = temporal
+        self._static = static
+        self._dates = dates
+
+        logger.info("Fitting GAM spatial component")
+        self.gam_ = SpatialGAM(n_splines=self.n_splines, lam=self.gam_lam)
+        self.gam_.fit(X, y, feature_names=feature_names)
+        gam_residuals = self.gam_.get_residuals(X, y)
+
+        # Residuals are per-cell (not time-varying): treat as T=1 for now
+        # The full spatiotemporal residual matrix is built from dense obs later
+        self._X_train = X
+        self._y_train = y
+        self.n_locations_ = len(y)
+        self.n_times_ = T
+        self.location_ids_ = np.array(static.grid_ids)
+        self.time_ids_ = np.array(dates)
+        self._y_matrix = None            # no panel obs available for SSM init
+        self._residual_matrix = None
+
+        # Build residual matrix from dense obs (satellite) for SSM fitting
+        lur_prior = self.gam_.predict(X)
+        grid_id_to_idx = {gid: i for i, gid in enumerate(static.grid_ids)}
+        lur_prior_arr = lur_prior  # (n_locations,)
+
+        # Vectorised: calibrate all satellite obs then pivot to (T, n_locations)
+        dense = temporal.dense_obs.copy()
+        if calibration is not None:
+            dense["obs_dense"] = calibration.apply(dense["obs_dense"].values)
+
+        # Map grid_id → location index; drop cells not in the model grid
+        dense["loc_idx"] = dense["grid_id"].map(grid_id_to_idx)
+        dense = dense.dropna(subset=["loc_idx"])
+        dense["loc_idx"] = dense["loc_idx"].astype(int)
+
+        # Map dates → time index
+        date_to_tidx = {d: i for i, d in enumerate(dates)}
+        dense["t_idx"] = dense["date"].map(date_to_tidx)
+        dense = dense.dropna(subset=["t_idx"])
+        dense["t_idx"] = dense["t_idx"].astype(int)
+
+        # Subtract GAM prior to get residuals
+        dense["residual"] = dense["obs_dense"].values - lur_prior_arr[dense["loc_idx"].values]
+
+        # Centre residuals: remove the mean offset so the SSM models temporal
+        # deviations around zero rather than absorbing a systematic scale offset
+        # between the calibrated satellite and the GAM prior.
+        residual_mean = dense["residual"].mean()
+        dense["residual"] -= residual_mean
+        self._residual_offset = float(residual_mean)
+        logger.info(
+            "Residual mean offset removed: %.4f µg/m³ (satellite-GAM scale gap)",
+            residual_mean,
+        )
+
+        # Fill into (T, n_locations) matrix
+        residual_matrix = np.full((T, self.n_locations_), np.nan)
+        residual_matrix[dense["t_idx"].values, dense["loc_idx"].values] = dense["residual"].values
+        self._residual_matrix = residual_matrix
+
+        # ── Project residuals to low-dimensional temporal factors ───────────
+        # SVD of the (T, n_locations) residual matrix.
+        # NaN cells (missing satellite obs) are filled with 0 before decomposition.
+        # The top `state_dim` factors capture the dominant city-wide temporal modes.
+        state_dim = self.state_dim
+        residual_filled = np.where(np.isnan(residual_matrix), 0.0, residual_matrix)
+        U, s, Vt = np.linalg.svd(residual_filled, full_matrices=False)
+        k = min(state_dim, len(s))
+        obs_projected = U[:, :k] * s[:k]       # (T, k) — temporal scores
+        self.Z_spatial_ = Vt[:k, :].T          # (n_locations, k) — spatial loadings
+        var_explained = 100 * (s[:k] ** 2).sum() / (s ** 2).sum()
+        logger.info(
+            "Residual SVD: top %d factors explain %.1f%% of variance → SSM obs_dim=%d",
+            k, var_explained, k,
+        )
+
+        logger.info("Fitting SSM on satellite-derived residuals with forcing")
+        self.ssm_ = StateSpaceModel(
+            state_dim=k,
+            em_max_iter=self.em_max_iter,
+            em_tol=self.em_tol,
+            scalability_mode=self.scalability_mode,
+            regularization=self.regularization,
+            random_state=self.random_state,
+        )
+        self.ssm_.fit(obs_projected, forcing_matrix=forcing_matrix)
+
+        self.is_fitted_ = True
+        logger.info("HybridGAMSSM fitted via fit_from_dataset()")
+        return self
+
     def _reshape_to_matrix(
         self,
         values: NDArray,
@@ -402,18 +604,28 @@ class HybridGAMSSM:
         # Spatial predictions from GAM
         gam_pred, gam_std = self.gam_.predict(X, return_std=True)
 
-        # Reshape to matrix form
-        spatial_matrix = gam_pred.reshape(self.n_times_, self.n_locations_)
+        # Reshape to (T, n_locations).
+        # fit_from_dataset provides static X (n_locations,) — tile across time.
+        if gam_pred.shape[0] == self.n_locations_:
+            spatial_matrix  = np.tile(gam_pred, (self.n_times_, 1))
+            gam_std_tiled   = np.tile(gam_std,  (self.n_times_, 1))
+        else:
+            spatial_matrix  = gam_pred.reshape(self.n_times_, self.n_locations_)
+            gam_std_tiled   = gam_std.reshape(self.n_times_, self.n_locations_)
         
-        # Temporal predictions from SSM
+        # Temporal predictions from SSM → expand to all locations via Z_spatial_
         ssm_pred = self.ssm_.predict(confidence_level=self.confidence_level)
-        
+        # ssm_pred.mean: (T, k),  Z_spatial_: (n_locations, k)
+        temporal_matrix = ssm_pred.mean @ self.Z_spatial_.T          # (T, n_locations)
+        temporal_std = np.sqrt(
+            (ssm_pred.std ** 2) @ (self.Z_spatial_ ** 2).T           # (T, n_locations)
+        )
+
         # Total prediction = spatial + temporal
-        total = spatial_matrix + ssm_pred.mean
-        
+        total = spatial_matrix + temporal_matrix
+
         # Combined uncertainty (assuming independence)
-        gam_std_matrix = gam_std.reshape(self.n_times_, self.n_locations_)
-        combined_std = np.sqrt(gam_std_matrix**2 + ssm_pred.std**2)
+        combined_std = np.sqrt(gam_std_tiled ** 2 + temporal_std ** 2)
         
         from scipy import stats
         z_score = stats.norm.ppf((1 + self.confidence_level) / 2)
@@ -423,7 +635,7 @@ class HybridGAMSSM:
         return HybridPrediction(
             total=total,
             spatial=spatial_matrix,
-            temporal=ssm_pred.mean,
+            temporal=temporal_matrix,
             std=combined_std,
             lower=lower,
             upper=upper,
@@ -520,12 +732,14 @@ class HybridGAMSSM:
         spatial_matrix = gam_pred.reshape(n_steps, self.n_locations_)
         gam_std_matrix = gam_std.reshape(n_steps, self.n_locations_)
         
-        # Temporal forecast
+        # Temporal forecast → expand to all locations via Z_spatial_
         ssm_forecast = self.ssm_.forecast(n_steps, confidence_level=self.confidence_level)
-        
+        temporal_matrix = ssm_forecast.mean @ self.Z_spatial_.T
+        temporal_std = np.sqrt((ssm_forecast.std ** 2) @ (self.Z_spatial_ ** 2).T)
+
         # Combine
-        total = spatial_matrix + ssm_forecast.mean
-        combined_std = np.sqrt(gam_std_matrix**2 + ssm_forecast.std**2)
+        total = spatial_matrix + temporal_matrix
+        combined_std = np.sqrt(gam_std_matrix ** 2 + temporal_std ** 2)
         
         from scipy import stats
         z_score = stats.norm.ppf((1 + self.confidence_level) / 2)
@@ -535,12 +749,12 @@ class HybridGAMSSM:
         return HybridPrediction(
             total=total,
             spatial=spatial_matrix,
-            temporal=ssm_forecast.mean,
+            temporal=temporal_matrix,
             std=combined_std,
             lower=lower,
             upper=upper,
         )
-        
+
     def evaluate(
         self,
         y_true: NDArray,
@@ -767,14 +981,19 @@ class HybridGAMSSM:
             json.dump(metadata, f, indent=2)
             
         # Save training data
+        loc_idx = (self._location_index_train
+                   if self._location_index_train is not None
+                   else np.array([]))
         np.savez(
             directory / "training_data.npz",
             X_train=self._X_train,
             y_train=self._y_train,
-            y_matrix=self._y_matrix,
-            residual_matrix=self._residual_matrix,
+            y_matrix=self._y_matrix if self._y_matrix is not None else np.array([]),
+            residual_matrix=self._residual_matrix if self._residual_matrix is not None else np.array([]),
             location_ids=self.location_ids_,
             time_ids=self.time_ids_,
+            location_index_train=loc_idx,
+            Z_spatial=self.Z_spatial_ if self.Z_spatial_ is not None else np.array([]),
         )
         
         logger.info(f"Model saved to {directory}")
@@ -821,13 +1040,24 @@ class HybridGAMSSM:
         data = np.load(directory / "training_data.npz", allow_pickle=True)
         model._X_train = data['X_train']
         model._y_train = data['y_train']
-        model._y_matrix = data['y_matrix']
-        model._residual_matrix = data['residual_matrix']
+        model._y_matrix = data['y_matrix'] if data['y_matrix'].size else None
+        model._residual_matrix = data['residual_matrix'] if data['residual_matrix'].size else None
         model.location_ids_ = data['location_ids']
         model.time_ids_ = data['time_ids']
-        
-        # Recompute SSM filter/smoother results for predictions using stored residuals
-        model.ssm_._restore_inference(model._residual_matrix)
+        loc_idx = data['location_index_train'] if 'location_index_train' in data else np.array([])
+        model._location_index_train = loc_idx if loc_idx.size else None
+        model.Z_spatial_ = data['Z_spatial'] if 'Z_spatial' in data and data['Z_spatial'].size else None
+
+        # Recompute SSM filter/smoother results using stored projected residuals
+        # Restore on the projected observations (Z_spatial_ maps back to full space)
+        if model.Z_spatial_ is not None and model._residual_matrix is not None:
+            residual_filled = np.where(np.isnan(model._residual_matrix), 0.0, model._residual_matrix)
+            k = model.Z_spatial_.shape[1]
+            U, s, _ = np.linalg.svd(residual_filled, full_matrices=False)
+            obs_projected = U[:, :k] * s[:k]
+            model.ssm_._restore_inference(obs_projected)
+        elif model._residual_matrix is not None:
+            model.ssm_._restore_inference(model._residual_matrix)
         
         model.n_locations_ = metadata['n_locations']
         model.n_times_ = metadata['n_times']
