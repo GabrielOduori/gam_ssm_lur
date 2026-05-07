@@ -19,7 +19,7 @@ def _save_metrics(metrics, path: Path) -> None:
 
 
 def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
-                   output_dir: Path, fig_dir: Path):
+                   output_dir: Path, fig_dir: Path, grid_gdf=None):
     """Run all evaluation metrics and save CSVs / diagnostic figures.
 
     Parameters
@@ -56,6 +56,34 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
     logger.info("GAM-LUR: RMSE=%.3f  MAE=%.3f  R²=%.3f  r=%.3f",
                 metrics.rmse, metrics.mae, metrics.r2, metrics.correlation)
     _save_metrics(metrics, output_dir / "gam_metrics.csv")
+
+    # Moran's I on GAM-LUR residuals (spatial autocorrelation diagnostic)
+    moran_result = moran_weights = None
+    try:
+        from libpysal.weights import Queen
+        from esda.moran import Moran
+        grid_gdf = static.grid_gdf if hasattr(static, "grid_gdf") else None
+        _gdf = grid_gdf if grid_gdf is not None else (
+            static.grid_gdf if hasattr(static, "grid_gdf") else None)
+        if _gdf is not None:
+            gam_res      = model._y_train - lur_pred
+            loc_gdf      = _gdf[_gdf["grid_id"].isin(model.location_ids_)].copy()
+            loc_gdf      = loc_gdf.set_index("grid_id").reindex(model.location_ids_).reset_index()
+            moran_weights = Queen.from_dataframe(loc_gdf, silence_warnings=True)
+            moran_weights.transform = "r"
+            moran_result  = Moran(gam_res, moran_weights, permutations=999)
+            sig = "p<0.001" if moran_result.p_sim < 0.001 else f"p={moran_result.p_sim:.3f}"
+            status = "spatially random ✓" if moran_result.p_sim > 0.05 else "autocorrelation remains ⚠"
+            logger.info("Moran's I (GAM residuals): I=%.4f  z=%.3f  %s  %s",
+                        moran_result.I, moran_result.z_norm, sig, status)
+            pd.DataFrame([{
+                "moran_I": moran_result.I,
+                "z_norm":  moran_result.z_norm,
+                "p_sim":   moran_result.p_sim,
+                "n_permutations": 999,
+            }]).to_csv(output_dir / "moran_i.csv", index=False)
+    except ImportError:
+        logger.warning("libpysal/esda not installed — Moran's I skipped")
 
     # Hybrid vs EPA daily observations
     y_obs     = epa_eval["obs_value"].values
@@ -178,7 +206,7 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
         output_dir=output_dir,
     )
 
-    return cv_df
+    return cv_df, moran_result, moran_weights
 
 
 def _write_comparison_table(gam_spatial_metrics, gam_temporal_metrics,

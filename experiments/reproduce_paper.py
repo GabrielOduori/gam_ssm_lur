@@ -157,8 +157,9 @@ def run(args) -> None:
     epa_eval = epa_eval.dropna(subset=["loc_idx", "t_idx"])
     epa_eval[["loc_idx", "t_idx"]] = epa_eval[["loc_idx", "t_idx"]].astype(int)
 
-    cv_df = evaluate_model(
+    cv_df, moran_result, moran_weights = evaluate_model(
         model, temporal, static, hybrid_pred, epa_eval, args, output_dir, fig_dir,
+        grid_gdf=ds.load_grid_geometry(),
     )
     logger.info("STEP 4 done in %s", _elapsed(t_stage)); t_stage = time.time()
 
@@ -171,6 +172,7 @@ def run(args) -> None:
     generate_figures(
         model, ds, hybrid_pred, epa_eval, cv_df, X_train_df,
         args, data_dir, output_dir, fig_dir, imp=imp,
+        moran_result=moran_result, moran_weights=moran_weights,
     )
     logger.info("STEP 5 done in %s", _elapsed(t_stage))
 

@@ -91,6 +91,21 @@ NO2_COLOURS = [
     "#4d004b",  # 28–40+
 ]
 
+def _resolve_provider(source: str):
+    """Resolve a dot-notation provider string to a contextily provider dict.
+
+    Examples
+    --------
+    ``"CartoDB.Positron"``  →  ``ctx.providers.CartoDB.Positron``
+    ``"OpenStreetMap.Mapnik"``  →  ``ctx.providers.OpenStreetMap.Mapnik``
+    """
+    import contextily as ctx
+    obj = ctx.providers
+    for part in source.split("."):
+        obj = obj[part]
+    return obj
+
+
 def _no2_cmap_norm():
     """Return (ListedColormap, BoundaryNorm) for the fixed NO2 colour scheme."""
     from matplotlib.colors import ListedColormap, BoundaryNorm
@@ -102,7 +117,7 @@ CMAP_NO2 = "no2_atmos"   # placeholder name — use _no2_cmap_norm() for actual 
 COL_LUR       = "steelblue"  # GAM LUR prior lines / satellite markers
 COL_SSM       = "darkorange" # GAM-SSM lines / uncertainty shading
 COL_OBS       = "black"      # observed station measurements
-ALPHA_MAP     = 0.8
+ALPHA_MAP     = 0.6
 ALPHA_SHADE   = 0.2
 MISSING_KWD   = {"color": "lightgrey", "alpha": ALPHA_MAP}
 
@@ -111,6 +126,44 @@ _STATION_PALETTE = [
     "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3",
     "#937860", "#DA8BC3", "#8C8C8C", "#CCB974",
 ]
+
+
+def _fix_colorbar_heights(fig: plt.Figure) -> None:
+    """Resize each colorbar axes to match the height of its sibling map axes.
+
+    Called after ``tight_layout()`` so that layout positions are final.
+    Colorbars are identified by aspect ratio (width << height); each is then
+    paired with its nearest map panel by 2D centre distance so the function
+    works correctly for both single-panel and multi-panel figures.
+    """
+    all_axes  = fig.axes
+    # Colorbars are much taller than wide; maps are roughly square or wider
+    cbar_axes = [a for a in all_axes
+                 if a.get_position().width < a.get_position().height * 0.3]
+    map_axes  = [a for a in all_axes
+                 if a.get_position().width >= a.get_position().height * 0.3]
+    if not map_axes or not cbar_axes:
+        return
+    for cbar_ax in cbar_axes:
+        cbar_pos = cbar_ax.get_position()
+        cbar_cx  = cbar_pos.x0 + cbar_pos.width  / 2
+        cbar_cy  = cbar_pos.y0 + cbar_pos.height / 2
+        # Nearest map by 2-D centre distance — correct for any grid layout
+        best = min(
+            map_axes,
+            key=lambda a: (
+                (a.get_position().x0 + a.get_position().width  / 2 - cbar_cx) ** 2 +
+                (a.get_position().y0 + a.get_position().height / 2 - cbar_cy) ** 2
+            ),
+        )
+        ref_pos = best.get_position()
+        cbar_ax.set_position([
+            cbar_pos.x0, ref_pos.y0,
+            cbar_pos.width, ref_pos.height,
+        ])
+        # Match colorbar fill opacity to the map polygon alpha
+        for coll in cbar_ax.collections:
+            coll.set_alpha(ALPHA_MAP)
 
 
 def _save(fig: plt.Figure, path: Optional[Union[str, Path]], dpi: int = 150) -> None:
@@ -176,13 +229,13 @@ class SpatialVisualizer:
         vmax: Optional[float] = None,
         legend: bool = True,
         legend_label: str = "NO₂ (µg/m³)",
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
     ) -> None:
         """Render values onto *ax* using polygon grid or scatter fallback."""
         values = np.asarray(values)
         gids = grid_ids or self.grid_ids
 
-        # Use the fixed Atmos-Street NO2 colour scheme for all NO2 maps.
-        # Diverging/error maps keep their own cmap and a continuous scale.
         if cmap == CMAP_NO2:
             cmap_obj, norm = _no2_cmap_norm()
             vmin = NO2_BOUNDS[0]
@@ -194,20 +247,36 @@ class SpatialVisualizer:
         if self.grid_gdf is not None and gids is not None:
             data = pd.DataFrame({"grid_id": gids, "_val": values})
             merged = self.grid_gdf.merge(data, on="grid_id", how="left")
-            legend_kwds = {"label": legend_label, "shrink": 0.85} if legend else {}
+
+            legend_kwds = {"label": legend_label} if legend else {}
             if norm is not None:
                 legend_kwds["extend"] = "max"
             merged.plot(
                 column="_val", ax=ax,
                 cmap=cmap_obj, vmin=vmin, vmax=vmax,
                 norm=norm,
-                alpha=ALPHA_MAP, legend=legend,
+                alpha=ALPHA_MAP,
+                legend=legend,
                 legend_kwds=legend_kwds,
                 missing_kwds=MISSING_KWD,
                 edgecolor="none",
             )
+
+            if basemap:
+                try:
+                    import contextily as ctx
+                    provider = (
+                        ctx.providers.CartoDB.Positron
+                        if basemap_source is None
+                        else _resolve_provider(basemap_source)
+                    )
+                    crs = merged.crs or "EPSG:4326"
+                    ctx.add_basemap(ax, source=provider, crs=crs, zoom="auto", zorder=0)
+                except ImportError:
+                    logger.warning("contextily not installed — basemap skipped")
+
         else:
-            # Scatter fallback — requires grid_gdf with lat/lon or external coords
+            # Scatter fallback
             if self.grid_gdf is not None and "geometry" in self.grid_gdf.columns:
                 cx = self.grid_gdf.geometry.centroid.x.values
                 cy = self.grid_gdf.geometry.centroid.y.values
@@ -237,6 +306,12 @@ class SpatialVisualizer:
         vmax: Optional[float] = None,
         legend_label: str = "NO₂ (µg/m³)",
         ax: Optional[plt.Axes] = None,
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
+        station_df: Optional[pd.DataFrame] = None,
+        station_lat_col: str = "latitude",
+        station_lon_col: str = "longitude",
+        station_label_col: str = "station_id",
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Axes:
         """Plot a single spatial surface.
@@ -250,17 +325,24 @@ class SpatialVisualizer:
         cmap : str
             Matplotlib colormap name.
         vmin, vmax : float, optional
-            Colorbar limits.  Defaults to 2nd/98th percentile.
+            Colorbar limits.  Defaults to 0/98th percentile.
         legend_label : str
             Colorbar label.
         ax : Axes, optional
             Existing axes to plot on.
+        basemap : bool
+            Overlay a CartoDB tile basemap (requires contextily).
+        basemap_source : str, optional
+            Tile provider, e.g. ``"CartoDB.Positron"`` (default) or
+            ``"OpenStreetMap.Mapnik"``.
+        station_df : pd.DataFrame, optional
+            DataFrame with station locations to overlay as labelled markers.
+            Must contain columns named by ``station_lat_col``,
+            ``station_lon_col``, and ``station_label_col``.
         save_path : str or Path, optional
             Path to save figure.
         """
         values = np.asarray(values)
-        # Anchor vmin=0 so background (low-NO2) cells render dark, making
-        # road corridors glow against a near-black field (paper Fig 5/6 style).
         if vmin is None:
             vmin = 0.0
         if vmax is None:
@@ -271,12 +353,36 @@ class SpatialVisualizer:
             fig, ax = plt.subplots(figsize=(8, 7))
 
         self._map_ax(ax, values, cmap=cmap, vmin=vmin, vmax=vmax,
-                     legend_label=legend_label)
+                     legend_label=legend_label,
+                     basemap=basemap, basemap_source=basemap_source)
+
+        # Overlay EPA station markers + labels
+        if station_df is not None:
+            import geopandas as gpd
+            sta_gdf = gpd.GeoDataFrame(
+                station_df,
+                geometry=gpd.points_from_xy(
+                    station_df[station_lon_col], station_df[station_lat_col]
+                ),
+                crs="EPSG:4326",
+            ).to_crs(self.grid_gdf.crs)
+            sta_gdf.plot(ax=ax, color="black", markersize=40,
+                         marker="^", zorder=6, label="EPA stations")
+            for _, row in sta_gdf.iterrows():
+                ax.annotate(
+                    row[station_label_col],
+                    xy=(row.geometry.x, row.geometry.y),
+                    xytext=(4, 4), textcoords="offset points",
+                    fontsize=7, fontweight="bold", color="black",
+                    zorder=7,
+                )
+
         if title:
             ax.set_title(title, fontsize=11, fontweight="bold")
 
         if standalone:
             plt.tight_layout()
+            _fix_colorbar_heights(ax.figure)
             _save(ax.figure, save_path)
 
         return ax
@@ -391,7 +497,7 @@ class SpatialVisualizer:
             vals = day.set_index(grid_id_col)[value_col]
             gids = list(vals.index)
             self._map_ax(ax, vals.values, grid_ids=gids,
-                         cmap="turbo", vmin=vmin, vmax=vmax)
+                         cmap="turbo", vmin=vmin, vmax=vmax, basemap=True)
 
             # Build title
             base = date_labels.get(d, str(d)) if date_labels else str(d)
@@ -411,6 +517,7 @@ class SpatialVisualizer:
         if suptitle:
             fig.suptitle(suptitle, fontsize=12, y=1.01)
         plt.tight_layout()
+        _fix_colorbar_heights(fig)
         _save(fig, save_path)
         return fig
 
@@ -436,8 +543,7 @@ class SpatialVisualizer:
         lim = float(np.nanpercentile(np.abs(res), 95))
 
         ncols = 3 if predictions is not None else 2
-        fig, axes = plt.subplots(1, ncols, figsize=(7 * ncols, 6),
-                                 constrained_layout=True)
+        fig, axes = plt.subplots(1, ncols, figsize=(7 * ncols, 6))
 
         col = 0
         if predictions is not None:
@@ -445,7 +551,7 @@ class SpatialVisualizer:
             vmax_pred = float(np.nanpercentile(pred, 98))
             self._map_ax(axes[col], pred, grid_ids=grid_ids,
                          cmap="turbo", vmin=0, vmax=vmax_pred,
-                         legend_label="NO₂ (µg/m³)")
+                         legend_label="NO₂ (µg/m³)", basemap=True)
             axes[col].set_title("(a) GAM Spatial Prediction",
                                 fontsize=11, fontweight="bold")
             col += 1
@@ -455,19 +561,21 @@ class SpatialVisualizer:
 
         self._map_ax(axes[col], res, grid_ids=grid_ids,
                      cmap=CMAP_RESIDUAL, vmin=-lim, vmax=lim,
-                     legend_label="Residual (µg/m³)")
+                     legend_label="Residual (µg/m³)", basemap=True)
         axes[col].set_title(f"{label_b} Signed Residuals  (obs − predicted)",
                             fontsize=11, fontweight="bold")
         col += 1
 
         self._map_ax(axes[col], np.abs(res), grid_ids=grid_ids,
                      cmap=CMAP_ERROR, vmin=0, vmax=lim,
-                     legend_label="|Residual| (µg/m³)")
+                     legend_label="|Residual| (µg/m³)", basemap=True)
         axes[col].set_title(f"{label_c} Absolute Error",
                             fontsize=11, fontweight="bold")
 
         if title:
             fig.suptitle(title, fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _fix_colorbar_heights(fig)
         _save(fig, save_path)
         return fig
 
@@ -790,6 +898,7 @@ class SpatialVisualizer:
                 ax, sector_preds[s],
                 cmap="turbo", vmin=vmin, vmax=vmax,
                 legend=(s == n_sectors - 1),  # colorbar on last panel only
+                basemap=True,
             )
             ax.set_title(
                 f"Dominant wind: {sector_names[s]}",
@@ -852,64 +961,72 @@ class SpatialVisualizer:
         freq  = wind_df[freq_cols].mean().values
         speed = wind_df[speed_cols].mean().values
 
-        # --- Main figure + inset axes ---
-        fig = plt.figure(figsize=(10, 8))
-        ax_map = fig.add_axes([0.05, 0.05, 0.88, 0.88])   # main map
-        ax_rose = fig.add_axes([0.68, 0.62, 0.28, 0.30],   # inset wind rose
+        # --- Layout: map left, colourbar strip right, wind rose inset top-left ---
+        fig = plt.figure(figsize=(11, 8))
+        ax_map  = fig.add_axes([0.05, 0.05, 0.78, 0.88])   # main map
+        ax_cbar = fig.add_axes([0.85, 0.15, 0.03, 0.60])   # NO₂ colourbar (right strip)
+        ax_rose = fig.add_axes([0.06, 0.60, 0.22, 0.28],   # wind rose — top-left
                                projection="polar")
 
-        # Draw main map
-        self._map_ax(ax_map, gam_values, cmap="turbo", legend=True)
+        # Draw main map — suppress built-in legend, we place it manually
+        self._map_ax(ax_map, gam_values, cmap="turbo", legend=False, basemap=True)
         ax_map.set_title(title, fontsize=12, fontweight="bold", pad=12)
 
-        # --- Wind rose (polar bar chart) ---
-        # Meteorological convention: 0° = N (top), clockwise
-        # matplotlib polar: 0° = E, anti-clockwise → convert
-        angles_met  = np.linspace(0, 2 * np.pi, n_sectors, endpoint=False)
-        # Rotate so N is at top and direction is clockwise
-        angles_plot = np.pi / 2 - angles_met
+        # Manual NO₂ colourbar in right strip
+        vmax_no2 = float(np.nanpercentile(gam_values, 98))
+        import matplotlib.colors as mcolors
+        sm_no2 = plt.cm.ScalarMappable(
+            cmap="turbo",
+            norm=mcolors.Normalize(vmin=0, vmax=vmax_no2),
+        )
+        sm_no2.set_array([])
+        cbar_no2 = fig.colorbar(sm_no2, cax=ax_cbar)
+        cbar_no2.set_label("NO₂ (µg/m³)", fontsize=9)
+        cbar_no2.ax.tick_params(labelsize=8)
 
+        # --- Wind rose ---
+        # Use sector angles directly; set_theta_zero_location + set_theta_direction
+        # handle the meteorological convention (N at top, clockwise).
+        angles = np.linspace(0, 2 * np.pi, n_sectors, endpoint=False)
         bar_width = (2 * np.pi) / n_sectors * 0.85
 
-        # Colour bars by mean wind speed
-        norm  = plt.Normalize(vmin=speed.min(), vmax=speed.max())
-        cmap_rose = plt.cm.Blues
-        colours = cmap_rose(norm(speed))
+        norm_speed = plt.Normalize(vmin=speed.min(), vmax=speed.max())
+        cmap_rose  = plt.cm.Blues
+        colours    = cmap_rose(norm_speed(speed))
 
-        bars = ax_rose.bar(
-            angles_plot, freq,
+        ax_rose.bar(
+            angles, freq,
             width=bar_width,
             color=colours,
-            alpha=0.85,
+            alpha=0.9,
             edgecolor="white",
-            linewidth=0.5,
+            linewidth=0.6,
             align="center",
         )
 
-        # Direction labels
-        for angle, label in zip(angles_plot, sector_labels):
-            r_label = freq.max() * 1.25
-            ax_rose.text(
-                angle, r_label, label,
-                ha="center", va="center",
-                fontsize=7, fontweight="bold",
-            )
+        # Direction labels just outside the longest bar
+        r_label = freq.max() * 1.3
+        for angle, label in zip(angles, sector_labels):
+            ax_rose.text(angle, r_label, label,
+                         ha="center", va="center",
+                         fontsize=7, fontweight="bold", color="k")
 
         ax_rose.set_theta_zero_location("N")
-        ax_rose.set_theta_direction(-1)          # clockwise
+        ax_rose.set_theta_direction(-1)   # clockwise
         ax_rose.set_yticklabels([])
         ax_rose.set_xticklabels([])
         ax_rose.spines["polar"].set_visible(False)
-        ax_rose.set_facecolor("whitesmoke")
-        ax_rose.set_title("Wind rose\n(ERA5 freq)", fontsize=7, pad=4)
+        ax_rose.set_facecolor("white")
+        ax_rose.patch.set_alpha(0.85)
+        ax_rose.set_title("ERA5 wind rose\n(bar = frequency)", fontsize=7, pad=6)
 
-        # Colourbar for wind speed inside rose
-        sm = plt.cm.ScalarMappable(cmap=cmap_rose, norm=norm)
-        sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax_rose, orientation="horizontal",
-                            pad=0.12, fraction=0.06, shrink=0.8)
-        cbar.set_label("Mean speed (m/s)", fontsize=6)
-        cbar.ax.tick_params(labelsize=6)
+        # Wind-speed colourbar below the rose
+        ax_spd = fig.add_axes([0.06, 0.57, 0.22, 0.02])
+        sm_spd = plt.cm.ScalarMappable(cmap=cmap_rose, norm=norm_speed)
+        sm_spd.set_array([])
+        cbar_spd = fig.colorbar(sm_spd, cax=ax_spd, orientation="horizontal")
+        cbar_spd.set_label("Mean speed (m/s)", fontsize=6)
+        cbar_spd.ax.tick_params(labelsize=6)
 
         _save(fig, save_path)
         return fig
@@ -935,7 +1052,6 @@ class TemporalVisualizer:
         date_col: str = "date",
         station_col: str = "station_id",
         obs_col: str = "obs_no2",
-        lur_col: str = "lur_prior",
         ssm_col: str = "no2",
         uncertainty_col: Optional[str] = "pred_uncertainty",
         satellite_col: Optional[str] = "has_satellite",
@@ -947,7 +1063,6 @@ class TemporalVisualizer:
 
         Each panel shows:
         - EPA observed (black dots)
-        - GAM LUR prior (steelblue dashed horizontal line)
         - GAM-SSM prediction (darkorange line) with ±1σ uncertainty shading
         - Satellite update days (steelblue upward triangles)
 
@@ -970,23 +1085,19 @@ class TemporalVisualizer:
             grp = preds_df[preds_df[station_col] == sid].sort_values(date_col)
             dates = grp[date_col].values
             obs   = grp[obs_col].values
-            lur   = float(grp[lur_col].iloc[0])
             ssm   = grp[ssm_col].values
 
-            # Observed
-            ax.plot(dates, obs, "k.", ms=4, lw=0, label="Observed", zorder=4)
+            # Observed — dots connected by line
+            ax.plot(dates, obs, "b.-", ms=4, lw=1, label="Observed", zorder=4)
 
-            # LUR prior
-            ax.axhline(lur, color=COL_LUR, ls="--", lw=1.5, label="GAM LUR prior")
-
-            # SSM line
-            ax.plot(dates, ssm, color=COL_SSM, lw=1.5, label="GAM-SSM", zorder=3)
-
-            # Uncertainty shading
+            # 95% CI shading (behind the smoothed line)
             if uncertainty_col and uncertainty_col in grp.columns:
                 unc = grp[uncertainty_col].values
-                ax.fill_between(dates, ssm - unc, ssm + unc,
-                                alpha=ALPHA_SHADE, color=COL_SSM, label="±1σ")
+                ax.fill_between(dates, ssm - 1.96 * unc, ssm + 1.96 * unc,
+                                alpha=ALPHA_SHADE, color="steelblue", label="95% CI", zorder=2)
+
+            # Smoothed prediction line
+            ax.plot(dates, ssm, color=COL_SSM, lw=1.5, label="Smoothed", zorder=3)
 
             # Satellite update markers
             if satellite_col and satellite_col in grp.columns:
@@ -1026,12 +1137,12 @@ class TemporalVisualizer:
         date_col: str = "date",
         obs_col: str = "obs_no2",
         pred_col: str = "no2",
-        lur_col: str = "lur_prior",
         uncertainty_col: str = "pred_uncertainty",
         station_col: str = "station_id",
         ncols: int = 3,
         title: str = "Daily NO₂: EPA Observed vs GAM-SSM Predicted",
         save_path: Optional[Union[str, Path]] = None,
+        summary_save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """Per-station panels comparing EPA observations vs GAM-SSM predictions.
 
@@ -1039,48 +1150,40 @@ class TemporalVisualizer:
         - Black dots: EPA observed NO₂
         - Orange line: GAM-SSM smoothed prediction
         - Blue shading: 95% prediction interval (±1.96σ)
-        - Grey dashed line: static GAM-LUR prior (constant per station)
 
-        A final summary panel shows the daily mean across all stations.
+        The all-stations daily mean is saved as a separate figure via
+        ``summary_save_path`` (if provided).
         """
         station_preds = station_preds.copy()
         station_preds[date_col] = pd.to_datetime(station_preds[date_col])
         stations = sorted(station_preds[station_col].unique())
         n = len(stations)
 
-        # +1 for the summary panel
-        total_panels = n + 1
-        nrows = (total_panels + ncols - 1) // ncols
+        nrows = (n + ncols - 1) // ncols
         fig, axes = plt.subplots(nrows, ncols,
                                  figsize=(5 * ncols, 4 * nrows),
                                  constrained_layout=True)
         axes = np.atleast_1d(axes).flatten()
 
         z95 = 1.96
-        has_lur = lur_col in station_preds.columns
 
         for i, sid in enumerate(stations):
             ax = axes[i]
             grp = station_preds[station_preds[station_col] == sid].sort_values(date_col)
 
-            # 95% prediction interval shading
+            # 95% CI shading
             ax.fill_between(
                 grp[date_col],
                 grp[pred_col] - z95 * grp[uncertainty_col],
                 grp[pred_col] + z95 * grp[uncertainty_col],
-                alpha=ALPHA_SHADE, color=COL_SSM, label="95% PI",
+                alpha=ALPHA_SHADE, color="steelblue", label="95% CI",
             )
-            # GAM-SSM smoothed prediction
+            # Smoothed prediction
             ax.plot(grp[date_col], grp[pred_col],
-                    color=COL_SSM, lw=2, label="GAM-SSM")
-            # EPA observed dots
+                    color=COL_SSM, lw=2, label="Smoothed")
+            # EPA observed — dots connected by line
             ax.plot(grp[date_col], grp[obs_col],
-                    "k.", ms=5, alpha=0.85, label="EPA observed")
-            # Static GAM prior — horizontal dashed reference line
-            if has_lur and not grp[lur_col].isna().all():
-                gam_val = float(grp[lur_col].iloc[0])
-                ax.axhline(gam_val, color="grey", lw=1.2, ls="--",
-                           alpha=0.7, label=f"GAM-LUR prior ({gam_val:.1f})")
+                    "b.-", ms=5, lw=1, label="Observed")
 
             ax.set_title(sid, fontsize=9, fontweight="bold")
             ax.set_ylabel("NO₂ (µg/m³)", fontsize=8)
@@ -1092,37 +1195,40 @@ class TemporalVisualizer:
             if i == 0:
                 ax.legend(fontsize=7, loc="upper right")
 
-        # Summary panel — daily mean across all stations
-        ax2 = axes[n]
+        # Hide any leftover axes
+        for ax in axes[n:]:
+            ax.set_visible(False)
+
+        fig.suptitle(title, fontsize=11, fontweight="bold")
+        _save(fig, save_path)
+
+        # ── Standalone summary figure — daily mean across all stations ──────────
         daily = station_preds.groupby(date_col).agg(
             obs_mean=(obs_col, "mean"),
             pred_mean=(pred_col, "mean"),
             pred_std=(uncertainty_col, "mean"),
         ).reset_index().sort_values(date_col)
 
+        fig2, ax2 = plt.subplots(figsize=(9, 4))
         ax2.fill_between(daily[date_col],
                          daily["pred_mean"] - z95 * daily["pred_std"],
                          daily["pred_mean"] + z95 * daily["pred_std"],
-                         alpha=ALPHA_SHADE, color=COL_SSM, label="95% PI")
+                         alpha=ALPHA_SHADE, color="steelblue", label="95% CI")
         ax2.plot(daily[date_col], daily["pred_mean"],
-                 color=COL_SSM, lw=2, label="GAM-SSM mean")
+                 color=COL_SSM, lw=2, label="Smoothed mean")
         ax2.plot(daily[date_col], daily["obs_mean"],
-                 "k.-", ms=6, lw=1.2, label="EPA observed mean")
-        ax2.set_title("All stations — daily mean", fontsize=9, fontweight="bold")
-        ax2.set_ylabel("NO₂ (µg/m³)", fontsize=8)
-        ax2.set_xlabel("Day", fontsize=8)
+                 "b.-", ms=6, lw=1.2, label="Observed mean")
+        ax2.set_title("All stations — daily mean NO₂", fontsize=11, fontweight="bold")
+        ax2.set_ylabel("NO₂ (µg/m³)", fontsize=9)
+        ax2.set_xlabel("Day", fontsize=9)
         ax2.xaxis.set_major_locator(mdates.DayLocator(interval=5))
         ax2.xaxis.set_major_formatter(mdates.DateFormatter("%-d"))
-        ax2.tick_params(labelsize=7)
-        ax2.legend(fontsize=7, loc="upper right")
+        ax2.tick_params(labelsize=8)
+        ax2.legend(fontsize=9, loc="upper right")
         ax2.grid(True, alpha=0.2)
+        plt.tight_layout()
+        _save(fig2, summary_save_path)
 
-        # Hide any leftover axes
-        for ax in axes[total_panels:]:
-            ax.set_visible(False)
-
-        fig.suptitle(title, fontsize=11, fontweight="bold")
-        _save(fig, save_path)
         return fig
 
     def plot_daily_mean_barchart(
@@ -1223,7 +1329,7 @@ class TemporalVisualizer:
 
 
 # ---------------------------------------------------------------------------
-# Model Comparison Visualizer
+# Model Comparison Visualiser
 # ---------------------------------------------------------------------------
 
 class ModelComparisonVisualizer:
@@ -1360,7 +1466,7 @@ class ModelComparisonVisualizer:
 
 
 # ---------------------------------------------------------------------------
-# Diagnostics Visualizer
+# Diagnostics Visualiser
 # ---------------------------------------------------------------------------
 
 class DiagnosticsVisualizer:
@@ -1473,10 +1579,25 @@ class DiagnosticsVisualizer:
     def plot_convergence(
         self,
         log_likelihoods: List[float],
+        n_iterations: Optional[int] = None,
+        converged: Optional[bool] = None,
+        tol: float = 1e-4,
         title: str = "EM Convergence",
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
-        """Log-likelihood trace and increment plot."""
+        """Log-likelihood trace and increment plot.
+
+        Parameters
+        ----------
+        log_likelihoods : list of float
+            LL value at each EM iteration.
+        n_iterations : int, optional
+            Total number of EM iterations (annotated on panel a).
+        converged : bool, optional
+            Whether EM met the stopping criterion (annotated on panel a).
+        tol : float
+            Convergence tolerance used — drawn as reference line on panel b.
+        """
         ll   = np.asarray(log_likelihoods)
         iters = np.arange(len(ll))
 
@@ -1488,10 +1609,25 @@ class DiagnosticsVisualizer:
         axes[0].set_title("(a) Log-Likelihood", fontsize=11, fontweight="bold")
         axes[0].grid(True, alpha=0.3)
 
+        # Annotate final LL + convergence metadata in top-left corner
+        info_lines = [f"Final ℒ = {ll[-1]:.2f}"]
+        if n_iterations is not None:
+            info_lines.append(f"Iterations: {n_iterations}")
+        if converged is not None:
+            status = "Yes" if converged else "No"
+            info_lines.append(f"Converged: {status}")
+        axes[0].text(
+            0.04, 0.97, "\n".join(info_lines),
+            transform=axes[0].transAxes,
+            fontsize=9, va="top", ha="left",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
+        )
+
         if len(ll) > 1:
             diff = np.abs(np.diff(ll))
             axes[1].semilogy(iters[1:], diff, "o-", color=COL_SSM, ms=4)
-            axes[1].axhline(1e-6, color="red", ls="--", lw=1, label="Tolerance 1e-6")
+            axes[1].axhline(tol, color="red", ls="--", lw=1,
+                            label=f"Tolerance {tol:.0e}")
             axes[1].set_xlabel("EM Iteration")
             axes[1].set_ylabel("|ΔLog-Likelihood|")
             axes[1].set_title("(b) Increment", fontsize=11, fontweight="bold")
@@ -1621,6 +1757,177 @@ class DiagnosticsVisualizer:
         _save(fig, save_path)
         return fig
 
+    def plot_moran_scatterplot(
+        self,
+        residuals: NDArray,
+        spatial_weights,
+        moran_result,
+        title: str = "Moran's I — Spatial Autocorrelation of GAM Residuals",
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> plt.Figure:
+        """Two-panel Moran's I figure.
+
+        Left panel — Moran scatterplot: standardised residuals vs spatial lag,
+        points coloured by quadrant (HH/LL/HL/LH), slope = Moran's I.
+
+        Right panel — Permutation distribution: histogram of Moran's I under
+        999 random permutations, with observed I marked as a vertical line,
+        showing statistical significance visually.
+
+        Parameters
+        ----------
+        residuals : array-like, shape (n_cells,)
+            GAM-LUR residuals at each modelled grid cell.
+        spatial_weights : libpysal.weights.W
+            Row-standardised spatial weights (Queen contiguity).
+        moran_result : esda.moran.Moran
+            Fitted Moran object (provides I, p_sim, z_norm, sim).
+        save_path : str or Path, optional
+        """
+        from libpysal.weights.spatial_lag import lag_spatial
+        from matplotlib.patches import Patch
+
+        z  = (residuals - residuals.mean()) / residuals.std()
+        wz = lag_spatial(spatial_weights, z)
+
+        # Quadrant masks
+        hh = (z >= 0) & (wz >= 0)
+        ll = (z <  0) & (wz <  0)
+        hl = (z >= 0) & (wz <  0)
+        lh = (z <  0) & (wz >= 0)
+
+        colours = np.empty(len(z), dtype=object)
+        colours[hh] = "#d73027"
+        colours[ll] = "#4575b4"
+        colours[hl] = "#fc8d59"
+        colours[lh] = "#91bfdb"
+
+        sig = "p < 0.001" if moran_result.p_sim < 0.001 else f"p = {moran_result.p_sim:.3f}"
+
+        fig, (ax_scatter, ax_hist) = plt.subplots(1, 2, figsize=(12, 5))
+
+        # ── Left: Moran scatterplot ──────────────────────────────────────────
+        ax_scatter.axhline(0, color="k", lw=0.5, alpha=0.4)
+        ax_scatter.axvline(0, color="k", lw=0.5, alpha=0.4)
+        ax_scatter.scatter(z, wz, c=colours, s=2, alpha=0.5, linewidths=0)
+
+        xlim = max(np.abs(z).max(), np.abs(wz).max()) * 1.05
+        xs   = np.array([-xlim, xlim])
+        ax_scatter.plot(xs, moran_result.I * xs, "k-", lw=1.5)
+
+        legend_elements = [
+            Patch(facecolor="#d73027", label="HH — high cluster"),
+            Patch(facecolor="#4575b4", label="LL — low cluster"),
+            Patch(facecolor="#fc8d59", label="HL — spatial outlier"),
+            Patch(facecolor="#91bfdb", label="LH — spatial outlier"),
+        ]
+        ax_scatter.legend(handles=legend_elements, fontsize=8, loc="upper left")
+        ax_scatter.annotate(
+            f"Moran's I = {moran_result.I:.4f}\nz = {moran_result.z_norm:.3f}  {sig}",
+            xy=(0.97, 0.03), xycoords="axes fraction",
+            ha="right", va="bottom", fontsize=9, fontweight="bold",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+        )
+        ax_scatter.set_xlabel("Standardised residual", fontsize=10)
+        ax_scatter.set_ylabel("Spatial lag of standardised residual", fontsize=10)
+        ax_scatter.set_xlim(-xlim, xlim)
+        ax_scatter.set_ylim(-xlim, xlim)
+        ax_scatter.set_title("(a) Moran Scatterplot", fontsize=11, fontweight="bold")
+
+        # ── Right: permutation distribution ─────────────────────────────────
+        if hasattr(moran_result, "sim") and moran_result.sim is not None:
+            sim_vals = moran_result.sim
+            ax_hist.hist(sim_vals, bins=40, color="steelblue", alpha=0.7,
+                         edgecolor="white", linewidth=0.4,
+                         label=f"Permuted I (n={len(sim_vals)})")
+            ax_hist.axvline(moran_result.I, color="#d73027", lw=2,
+                            label=f"Observed I = {moran_result.I:.4f}")
+            ax_hist.axvline(moran_result.EI, color="k", lw=1.2, linestyle="--",
+                            label=f"E[I] = {moran_result.EI:.4f}")
+            ax_hist.legend(fontsize=8)
+            ax_hist.set_xlabel("Moran's I (permuted)", fontsize=10)
+            ax_hist.set_ylabel("Frequency", fontsize=10)
+            ax_hist.annotate(
+                f"{sig}\nz = {moran_result.z_norm:.3f}",
+                xy=(0.97, 0.97), xycoords="axes fraction",
+                ha="right", va="top", fontsize=9, fontweight="bold",
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+            )
+        else:
+            ax_hist.text(0.5, 0.5, "Permutation distribution\nnot available",
+                         ha="center", va="center", transform=ax_hist.transAxes,
+                         fontsize=10, color="grey")
+        ax_hist.set_title("(b) Permutation Distribution", fontsize=11, fontweight="bold")
+
+        fig.suptitle(title, fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save(fig, save_path)
+        return fig
+
+    def plot_svd_scree(
+        self,
+        residual_matrix: NDArray,
+        k_chosen: int = 3,
+        k_max: int = 10,
+        title: str = "SVD Factor Selection",
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> plt.Figure:
+        """Two-panel SVD scree plot.
+
+        Left panel — individual variance explained per factor.
+        Right panel — cumulative variance explained.
+        Both panels mark the chosen k with a vertical dashed line.
+
+        Parameters
+        ----------
+        residual_matrix : array-like, shape (T, n_locations)
+            Satellite-derived residual field (NaN filled with 0 before SVD).
+        k_chosen : int
+            Number of factors selected for the SSM.
+        k_max : int
+            Number of factors to display on the plot.
+        save_path : str or Path, optional
+        """
+        R = np.where(np.isnan(residual_matrix), 0.0, residual_matrix)
+        _, s, _ = np.linalg.svd(R, full_matrices=False)
+
+        var_total = (s ** 2).sum()
+        var_pct   = (s ** 2) / var_total * 100
+        cumvar    = np.cumsum(var_pct)
+        ks        = np.arange(1, k_max + 1)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+        # (a) Scree
+        ax1.plot(ks, var_pct[:k_max], "o-", color="steelblue", lw=1.5, ms=6)
+        ax1.axvline(k_chosen, color="#d73027", lw=1.5, linestyle="--",
+                    label=f"k = {k_chosen} (chosen)")
+        ax1.set_xlabel("Number of factors (k)", fontsize=10)
+        ax1.set_ylabel("Variance explained (%)", fontsize=10)
+        ax1.set_title("(a) Scree Plot", fontsize=11, fontweight="bold")
+        ax1.set_xticks(ks)
+        ax1.legend(fontsize=9)
+        ax1.grid(True, alpha=0.3)
+
+        # (b) Cumulative
+        ax2.plot(ks, cumvar[:k_max], "s-", color="darkorange", lw=1.5, ms=6)
+        ax2.axvline(k_chosen, color="#d73027", lw=1.5, linestyle="--",
+                    label=f"k = {k_chosen}: {cumvar[k_chosen - 1]:.1f}%")
+        ax2.axhline(85, color="grey", lw=1, linestyle=":", alpha=0.7,
+                    label="85% threshold")
+        ax2.set_xlabel("Number of factors (k)", fontsize=10)
+        ax2.set_ylabel("Cumulative variance explained (%)", fontsize=10)
+        ax2.set_title("(b) Cumulative Variance Explained", fontsize=11,
+                      fontweight="bold")
+        ax2.set_xticks(ks)
+        ax2.legend(fontsize=9)
+        ax2.grid(True, alpha=0.3)
+
+        fig.suptitle(title, fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save(fig, save_path)
+        return fig
+
 
 # ---------------------------------------------------------------------------
 # Convenience factory
@@ -1684,11 +1991,26 @@ def create_publication_figure_set(
     cv   = ModelComparisonVisualizer()
     dv   = DiagnosticsVisualizer()
 
+    # Build station lat/lon lookup from station_preds + grid centroid
+    station_loc_df = None
+    if station_preds is not None and grid_gdf is not None:
+        import geopandas as gpd
+        grid_centroids = grid_gdf.copy()
+        grid_centroids["longitude"] = grid_gdf.geometry.centroid.to_crs("EPSG:4326").x
+        grid_centroids["latitude"]  = grid_gdf.geometry.centroid.to_crs("EPSG:4326").y
+        sta_grid = (station_preds[["station_id", "grid_id"]]
+                    .drop_duplicates()
+                    .merge(grid_centroids[["grid_id", "latitude", "longitude"]],
+                           on="grid_id", how="left"))
+        station_loc_df = sta_grid.dropna(subset=["latitude", "longitude"])
+
     # GAM LUR prior map
     if hasattr(model, "gam_") and model.gam_ is not None:
         lur_pred = model.gam_.predict(model._X_train)
         sv.plot_surface(
             lur_pred, title="GAM LUR — Annual Mean NO₂",
+            basemap=True,
+            station_df=station_loc_df,
             save_path=output_dir / "static_lur_prior.png",
         )
 
@@ -1709,8 +2031,13 @@ def create_publication_figure_set(
     # EM convergence
     if (hasattr(model, "ssm_") and model.ssm_ is not None
             and model.ssm_.em_result_ is not None):
+        er = model.ssm_.em_result_
+        em_tol = getattr(model, "em_tol", 1e-4)
         dv.plot_convergence(
-            model.ssm_.em_result_.log_likelihoods,
+            er.log_likelihoods,
+            n_iterations=er.n_iterations,
+            converged=er.converged,
+            tol=em_tol,
             save_path=output_dir / "em_convergence.png",
         )
 
@@ -1731,8 +2058,8 @@ def create_publication_figure_set(
             ssm_df, highlighted_dates=dates,
             title=(
                 "Daily Area-Mean NO₂\n"
-                "Highlighted days selected to span the observed temporal range "
-                "(minimum, lower-tercile, upper-tercile, maximum)"
+                # "Highlighted days selected to span the observed temporal range "
+                # "(minimum, lower-tercile, upper-tercile, maximum)"
             ),
             save_path=output_dir / "ssm_daily_mean_barchart.png",
         )
@@ -1760,6 +2087,11 @@ def create_publication_figure_set(
         )
 
     # GAM map + wind rose inset (requires ERA5 wind data)
+    # This map is a bit hacky..Also dont like the position of the 
+    # wind rose legend, but it was a challenge to fit it in without 
+    # obscuring the map. I will probably not use it in 
+    # results presented this time.
+
     if (wind_df is not None
             and hasattr(model, "gam_") and model.gam_ is not None):
         lur_vals = model.gam_.predict(model._X_train)
