@@ -14,13 +14,14 @@ from gam_ssm_lur.visualization import (
     TemporalVisualizer,
     create_publication_figure_set,
 )
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 def generate_figures(model, ds, hybrid_pred, epa_eval, cv_df, X_train_df,
                      args, data_dir: Path, output_dir: Path, fig_dir: Path,
-                     imp=None):
+                     imp=None, moran_result=None, moran_weights=None):  # noqa: ARG001
     """Assemble and save all publication figures.
 
     Parameters
@@ -66,6 +67,7 @@ def generate_figures(model, ds, hybrid_pred, epa_eval, cv_df, X_train_df,
     station_preds = pd.DataFrame([
         {
             "station_id":       row["station_id"],
+            "grid_id":          row["grid_id"],
             "date":             row["date"],
             "obs_no2":          row["obs_value"],
             "lur_prior":        gam_pred_by_gid.get(row["grid_id"], float("nan")),
@@ -90,24 +92,46 @@ def generate_figures(model, ds, hybrid_pred, epa_eval, cv_df, X_train_df,
         wind_df=wind_df,
     )
 
-    sv = SpatialVisualizer(grid_gdf=grid_gdf, grid_ids=list(model.location_ids_))
-
-    if imp is not None:
-        sv.plot_feature_importance(
-            imp, title="Selected Feature Importances",
-            save_path=fig_dir / "feature_importance.png",
+    # SVD scree plot — factor selection diagnostic
+    if model._residual_matrix is not None:
+        dv = DiagnosticsVisualizer()
+        dv.plot_svd_scree(
+            model._residual_matrix,
+            k_chosen=model.ssm_.state_dim,
+            save_path=fig_dir / "svd_scree.png",
         )
 
-    sv.plot_partial_dependence(
-        model.gam_,
-        n_top=min(9, len(model.gam_.feature_names_)),
-        save_path=fig_dir / "gam_partial_response.png",
-    )
+    sv = SpatialVisualizer(grid_gdf=grid_gdf, grid_ids=list(model.location_ids_))
+
+    # Redundant with SHAP beeswarm — SHAP shows direction + magnitude, RF importance just ranks
+    # if imp is not None:
+    #     sv.plot_feature_importance(
+    #         imp, title="Selected Feature Importances",
+    #         save_path=fig_dir / "feature_importance.png",
+    #     )
+    # The partial dependence plots are not very informative for this model, 
+    # and take a long time to compute, so I have decided to omit them from 
+    # the paper figures for now. I may revisit this decision in the future 
+    # if I find a more efficient way to compute them.
+    # sv.plot_partial_dependence(
+    #     model.gam_,
+    #     n_top=min(9, len(model.gam_.feature_names_)),
+    #     save_path=fig_dir / "gam_partial_response.png",
+    # )
 
     sv.plot_shap_summary(
         model.gam_, X_train_df,
         save_path=fig_dir / "shap_summary.png",
     )
+
+    # Moran's I scatterplot (spatial autocorrelation of GAM residuals)
+    if moran_result is not None and moran_weights is not None:
+        lur_res = model._y_train - model.gam_.predict(model._X_train)
+        dv = DiagnosticsVisualizer()
+        dv.plot_moran_scatterplot(
+            lur_res, moran_weights, moran_result,
+            save_path=fig_dir / "moran_scatterplot.png",
+        )
 
     # Probabilistic calibration — reliability diagram + sharpness + ISS
     y_obs     = epa_eval["obs_value"].values
@@ -119,9 +143,10 @@ def generate_figures(model, ds, hybrid_pred, epa_eval, cv_df, X_train_df,
         save_path=fig_dir / "reliability_diagram.png",
     )
 
-    # EPA observed vs predicted time series (per-station + daily mean)
+    # EPA observed vs predicted time series (per-station + standalone daily mean)
     tv = TemporalVisualizer()
     tv.plot_epa_vs_predicted_timeseries(
         station_preds,
         save_path=fig_dir / "epa_vs_predicted_timeseries.png",
+        summary_save_path=fig_dir / "epa_daily_mean_timeseries.png",
     )

@@ -151,7 +151,26 @@ def main() -> None:
     imp_path = run_dir / "feature_importance.csv"
     imp = pd.read_csv(imp_path) if imp_path.exists() else None
 
-    # ── 8. Generate figures ───────────────────────────────────────────────────
+    # ── 8. Reconstruct Moran weights + result (if saved) ─────────────────────
+    moran_result = moran_weights = None
+    moran_path = run_dir / "moran_i.csv"
+    if moran_path.exists():
+        try:
+            from libpysal.weights import Queen
+            from esda.moran import Moran
+            grid_gdf = ds.load_grid_geometry()
+            loc_gdf  = grid_gdf[grid_gdf["grid_id"].isin(model.location_ids_)].copy()
+            loc_gdf  = loc_gdf.set_index("grid_id").reindex(model.location_ids_).reset_index()
+            moran_weights = Queen.from_dataframe(loc_gdf, silence_warnings=True)
+            moran_weights.transform = "r"
+            lur_res = model._y_train - model.gam_.predict(model._X_train)
+            moran_result = Moran(lur_res, moran_weights, permutations=999)
+            logger.info("Moran's I reconstructed: I=%.4f  p=%.4f",
+                        moran_result.I, moran_result.p_sim)
+        except ImportError:
+            logger.warning("libpysal/esda not installed — Moran scatterplot skipped")
+
+    # ── 9. Generate figures ───────────────────────────────────────────────────
     logger.info("Generating figures → %s", fig_dir)
     generate_figures(
         model=model,
@@ -165,6 +184,8 @@ def main() -> None:
         output_dir=run_dir,
         fig_dir=fig_dir,
         imp=imp,
+        moran_result=moran_result,
+        moran_weights=moran_weights,
     )
 
     logger.info("Done. Figures saved to %s", fig_dir)
