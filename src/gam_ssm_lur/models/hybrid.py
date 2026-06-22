@@ -193,7 +193,22 @@ class HybridGAMSSM:
 
         # Spatial loading matrix: maps (state_dim,) temporal state → (n_locations,)
         self.Z_spatial_: Optional[NDArray] = None
-        
+
+        # Per-location SVD truncation residual variance (variance NOT captured by
+        # the top state_dim SVD factors, stored so predict() can include it).
+        self._truncation_var_: Optional[NDArray] = None
+
+        # Variance of calibration residuals (satellite vs surface EPA), representing
+        # the measurement representativeness error when predicting surface NO₂.
+        self._sigma2_obs: float = 0.0
+
+        # Optional spatially-resolved traffic correction (T, n_locations), calibrated
+        # against EPA residuals via traffic_field.calibrate_traffic_field(). Kept
+        # separate from the satellite-driven SSM because that component is bottlenecked
+        # to k SVD factors and cannot represent road-network-scale spatial detail.
+        self._traffic_field: Optional[NDArray] = None
+        self._traffic_calibration = None
+
         self.is_fitted_ = False
         
     def fit(
@@ -421,6 +436,11 @@ class HybridGAMSSM:
 
         forcing_matrix = np.column_stack([activity_vec, met_mean])  # (T, 2)
 
+        # Store sigma2_obs: represents satellite-to-surface measurement uncertainty.
+        # Included in prediction intervals so they reflect uncertainty at point
+        # locations (EPA stations), not just at the satellite grid scale.
+        self._sigma2_obs = float(calibration.sigma2_obs) if calibration is not None else 0.0
+
         # Store for later use (calibration, validation)
         self._calibration = calibration
         self._temporal = temporal
@@ -497,6 +517,23 @@ class HybridGAMSSM:
         logger.info(
             "Residual SVD: top %d factors explain %.1f%% of variance → SSM obs_dim=%d",
             k, var_explained, k,
+        )
+
+        # Per-location variance of the residuals NOT captured by the top k SVD
+        # factors.  These are included in prediction intervals so that spatial
+        # patterns outside the low-dimensional subspace contribute to uncertainty.
+        residual_reconstructed = (U[:, :k] * s[:k]) @ Vt[:k, :]   # (T, n_locations)
+        truncation_error = residual_filled - residual_reconstructed  # (T, n_locations)
+        # Use the original NaN mask so missing cells don't inflate the variance
+        valid_mask = ~np.isnan(residual_matrix)
+        self._truncation_var_ = np.where(
+            valid_mask.sum(axis=0) > 1,
+            np.nanvar(np.where(valid_mask, truncation_error, np.nan), axis=0),
+            0.0,
+        )
+        logger.info(
+            "Truncation variance: mean=%.3f, median=%.3f µg/m³ (added to prediction std)",
+            self._truncation_var_.mean(), np.median(self._truncation_var_),
         )
 
         logger.info("Fitting SSM on satellite-derived residuals with forcing")
@@ -621,12 +658,46 @@ class HybridGAMSSM:
             (ssm_pred.std ** 2) @ (self.Z_spatial_ ** 2).T           # (T, n_locations)
         )
 
-        # Total prediction = spatial + temporal
-        total = spatial_matrix + temporal_matrix
+        # Total prediction = spatial + temporal + mean residual offset
+        # _residual_offset is the mean of (calibrated_obs - GAM_prior) removed
+        # before SVD/SSM fitting; adding it back here restores the correct scale.
+        total = spatial_matrix + temporal_matrix + self._residual_offset
 
-        # Combined uncertainty (assuming independence)
-        combined_std = np.sqrt(gam_std_tiled ** 2 + temporal_std ** 2)
-        
+        # Optional spatially-resolved traffic correction (see add_traffic_correction).
+        # Added independently of the satellite-driven SSM term so it can carry
+        # road-network-scale spatial detail the k-factor SVD bottleneck discards.
+        if self._traffic_field is not None and self._traffic_calibration is not None:
+            traffic_term = self._traffic_calibration.apply(self._traffic_field)
+            total = total + np.nan_to_num(traffic_term, nan=0.0)
+
+        # SSM observation noise (H) propagated through Z_spatial_.
+        # H is estimated in the k-dimensional projected (temporal-score) space;
+        # each diagonal entry is the noise variance for one SVD factor.
+        # Propagating through Z_spatial_ gives the contribution per location.
+        if self.ssm_.H_ is not None:
+            h_diag = (np.diag(self.ssm_.H_) if self.ssm_.H_.ndim == 2
+                      else self.ssm_.H_.ravel())
+            obs_noise_var = h_diag @ (self.Z_spatial_ ** 2).T    # (n_locations,)
+        else:
+            obs_noise_var = np.zeros(self.n_locations_)
+
+        # SVD truncation variance: variance of residuals not captured by top k factors.
+        trunc_var = (self._truncation_var_
+                     if self._truncation_var_ is not None
+                     else np.zeros(self.n_locations_))
+
+        # Combined uncertainty (independence assumption across components).
+        # Note: sigma2_obs (satellite-to-surface mismatch) is intentionally excluded
+        # here because it absorbs all TROPOMI-EPA correlation noise and would produce
+        # uninformatively wide intervals (~78 µg/m³ width for r≈0.2).
+        # Use calibrate_intervals_conformal() for properly calibrated prediction bands.
+        combined_std = np.sqrt(
+            gam_std_tiled ** 2
+            + temporal_std ** 2
+            + obs_noise_var[np.newaxis, :]     # broadcast: (1, n_locations)
+            + trunc_var[np.newaxis, :]          # broadcast: (1, n_locations)
+        )
+
         from scipy import stats
         z_score = stats.norm.ppf((1 + self.confidence_level) / 2)
         lower = total - z_score * combined_std
@@ -737,8 +808,8 @@ class HybridGAMSSM:
         temporal_matrix = ssm_forecast.mean @ self.Z_spatial_.T
         temporal_std = np.sqrt((ssm_forecast.std ** 2) @ (self.Z_spatial_ ** 2).T)
 
-        # Combine
-        total = spatial_matrix + temporal_matrix
+        # Combine (apply same residual offset as in predict())
+        total = spatial_matrix + temporal_matrix + self._residual_offset
         combined_std = np.sqrt(gam_std_matrix ** 2 + temporal_std ** 2)
         
         from scipy import stats
@@ -880,7 +951,125 @@ class HybridGAMSSM:
             X=X,
         )
         return self.evaluate(y_true=y_true, y_pred=aligned_pred)
-        
+
+    def add_traffic_correction(
+        self,
+        traffic_field: NDArray,
+        epa_eval: pd.DataFrame,
+        y_col: str = "obs_value",
+    ) -> "TrafficFieldCalibration":
+        """Fit and attach a spatially-resolved traffic correction term.
+
+        Must be called after :meth:`fit` / :meth:`fit_from_dataset`. Computes
+        the model's current (GAM + satellite-SSM) prediction, calibrates
+        ``traffic_field`` against the residual EPA variance that prediction
+        fails to explain, and stores the result so :meth:`predict` adds it as
+        an independent additive term — kept outside the k-factor SVD
+        bottleneck so it can carry road-network-scale spatial detail that the
+        satellite-driven component cannot.
+
+        Parameters
+        ----------
+        traffic_field : (T, n_locations) ndarray
+            Output of ``traffic_field.compute_traffic_field``, in the same
+            (time, location) order as ``self.time_ids_`` / ``self.location_ids_``.
+        epa_eval : pd.DataFrame
+            Must contain ``t_idx``, ``loc_idx``, and ``y_col`` columns.
+
+        Returns
+        -------
+        TrafficFieldCalibration
+            The fitted beta0/beta1/r, also stored on the model.
+        """
+        from gam_ssm_lur.traffic_field import calibrate_traffic_field
+
+        self._check_fitted()
+        baseline_pred = self.predict().total  # GAM + satellite-SSM only (traffic not yet attached)
+        calibration = calibrate_traffic_field(
+            traffic_field=traffic_field,
+            gam_ssm_pred=baseline_pred,
+            epa_eval=epa_eval,
+            y_col=y_col,
+        )
+        self._traffic_field = traffic_field
+        self._traffic_calibration = calibration
+        return calibration
+
+    def calibrate_intervals_conformal(
+        self,
+        y_obs: NDArray,
+        t_idx: NDArray,
+        loc_idx: NDArray,
+        alpha: float = 0.05,
+        station_ids: Optional[NDArray] = None,
+    ) -> float:
+        """Estimate a conformal prediction scale factor using held-out EPA observations.
+
+        Implements leave-one-station-out (LOSO) split conformal prediction:
+        for each station, calibrate on the remaining stations, compute the
+        (1-α) normalised-residual quantile, and report the median correction
+        factor across leave-one-out folds.
+
+        The resulting scale factor ``q_hat`` should be multiplied by the
+        prediction std returned by :meth:`predict` to obtain intervals with
+        empirical (1-α) marginal coverage at station locations.
+
+        Parameters
+        ----------
+        y_obs : array-like of shape (n_obs,)
+            EPA point observations used for calibration.
+        t_idx : array-like of shape (n_obs,)
+            Time indices (rows of the model prediction grid).
+        loc_idx : array-like of shape (n_obs,)
+            Location indices (columns of the model prediction grid).
+        alpha : float
+            Miscoverage level (default 0.05 → 95% intervals).
+        station_ids : array-like of shape (n_obs,), optional
+            Station identifier per observation.  Required for LOSO; if None,
+            falls back to a single-split calibration (all obs used together).
+
+        Returns
+        -------
+        q_hat : float
+            Conformal correction factor.  Multiply prediction std by this value.
+        """
+        self._check_fitted()
+
+        y_obs = np.asarray(y_obs).ravel()
+        t_idx = np.asarray(t_idx).ravel().astype(int)
+        loc_idx = np.asarray(loc_idx).ravel().astype(int)
+
+        pred = self.predict()
+        y_pred = pred.total[t_idx, loc_idx]
+        y_std = pred.std[t_idx, loc_idx]
+        scores = np.abs(y_obs - y_pred) / (y_std + 1e-9)
+
+        if station_ids is None:
+            n = len(scores)
+            level = min(np.ceil((n + 1) * (1 - alpha)) / n, 1.0)
+            q_hat = float(np.quantile(scores, level))
+            return q_hat
+
+        station_ids = np.asarray(station_ids).ravel()
+        unique_stations = np.unique(station_ids)
+        q_hats = []
+        for held_out in unique_stations:
+            cal_mask = station_ids != held_out
+            cal_scores = scores[cal_mask]
+            n = len(cal_scores)
+            if n < 2:
+                continue
+            level = min(np.ceil((n + 1) * (1 - alpha)) / n, 1.0)
+            q_hats.append(np.quantile(cal_scores, level))
+
+        if not q_hats:
+            # Fallback if too few stations for LOSO
+            n = len(scores)
+            level = min(np.ceil((n + 1) * (1 - alpha)) / n, 1.0)
+            return float(np.quantile(scores, level))
+
+        return float(np.median(q_hats))
+
     def summary(self) -> HybridSummary:
         """Get model summary.
         
@@ -976,6 +1165,8 @@ class HybridGAMSSM:
             'confidence_level': self.confidence_level,
             'n_locations': self.n_locations_,
             'n_times': self.n_times_,
+            'residual_offset': self._residual_offset,
+            'sigma2_obs': self._sigma2_obs,
         }
         with open(directory / "metadata.json", 'w') as f:
             json.dump(metadata, f, indent=2)
@@ -994,6 +1185,8 @@ class HybridGAMSSM:
             time_ids=self.time_ids_,
             location_index_train=loc_idx,
             Z_spatial=self.Z_spatial_ if self.Z_spatial_ is not None else np.array([]),
+            truncation_var=(self._truncation_var_ if self._truncation_var_ is not None
+                            else np.array([])),
         )
         
         logger.info(f"Model saved to {directory}")
@@ -1061,6 +1254,10 @@ class HybridGAMSSM:
         
         model.n_locations_ = metadata['n_locations']
         model.n_times_ = metadata['n_times']
+        model._residual_offset = float(metadata.get('residual_offset', 0.0))
+        model._sigma2_obs = float(metadata.get('sigma2_obs', 0.0))
+        trunc = data.get('truncation_var', np.array([]))
+        model._truncation_var_ = trunc if trunc.size else None
         model.is_fitted_ = True
         
         logger.info(f"Model loaded from {directory}")

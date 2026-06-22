@@ -42,6 +42,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from gam_ssm_lur import HybridGAMSSM
 from gam_ssm_lur.data import SpatiotemporalDataset
+from gam_ssm_lur.fetch_data import ensure_data_available
 from gam_ssm_lur.features import inverse_distance_transform, filter_sparse_cells
 from pipeline.features import prepare_features
 from pipeline.evaluate import evaluate_model
@@ -72,6 +73,8 @@ def run(args) -> None:
     fig_dir = output_dir / "figures"
     fig_dir.mkdir(exist_ok=True)
     logger.info("Output directory: %s", output_dir.resolve())
+
+    ensure_data_available(data_dir)
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
     logger.info("=" * 60)

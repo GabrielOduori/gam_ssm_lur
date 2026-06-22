@@ -70,6 +70,21 @@ data/
     └── wind_sector_2023-06_daily.csv  # ERA5 wind sector data
 ```
 
+### Data Access
+
+The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI — always resolves to the latest version).
+
+You don't need to download this manually. If `data/` is missing any required file, `experiments/reproduce_paper.py` automatically fetches and extracts the archive on first run via `ensure_data_available()` in `src/gam_ssm_lur/fetch_data.py`. To trigger this fetch standalone:
+
+```python
+from pathlib import Path
+from gam_ssm_lur.fetch_data import ensure_data_available
+
+ensure_data_available(Path("data"))
+```
+
+The results reported in the paper were generated from version v3 of the dataset (DOI: [10.5281/zenodo.20793214](https://doi.org/10.5281/zenodo.20793214)); the concept DOI may point to a newer version by the time you read this.
+
 ## Reproducing Paper Results
 
 ```bash

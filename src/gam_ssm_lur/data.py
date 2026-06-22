@@ -252,6 +252,10 @@ class SpatiotemporalDataset:
         met_speed_prefix: str = "wind_sector_",
         met_freq_suffix: str = "_freq",
         met_speed_suffix: str = "_mean_speed",
+        # Overpass window: hours (inclusive) over which satellite, EPA, and
+        # traffic observations are averaged before entering the model.
+        overpass_window_start: int = 11,
+        overpass_window_end: int = 14,
         # Grid geometry
         grid_geojson: Optional[str] = "grid/grid.geojson",
     ):
@@ -283,6 +287,9 @@ class SpatiotemporalDataset:
         self.met_freq_suffix = met_freq_suffix
         self.met_speed_suffix = met_speed_suffix
 
+        self.overpass_window_start = overpass_window_start
+        self.overpass_window_end   = overpass_window_end
+
         self._grid_geojson = (
             self.data_dir / grid_geojson if grid_geojson else None
         )
@@ -312,6 +319,10 @@ class SpatiotemporalDataset:
     def load_temporal(self) -> TemporalData:
         """Load all time-varying data for the SSM component.
 
+        All time series (satellite, EPA, traffic) are averaged over the
+        overpass window [overpass_window_start, overpass_window_end] hours
+        (inclusive) rather than matched to a single overpass hour.
+
         Returns
         -------
         TemporalData
@@ -320,19 +331,17 @@ class SpatiotemporalDataset:
         """
         dense_obs = self._load_dense_obs()
         point_obs = self._load_point_obs()
-        activity = self._load_activity_forcing()
-        met = self._load_met_forcing()
+        activity  = self._load_activity_forcing()
+        met       = self._load_met_forcing()
 
         # Union of dates across dense obs and activity
-        dates_dense = set(dense_obs["date"].unique()) if len(dense_obs) else set()
-        dates_activity = set(activity["date"].unique()) if len(activity) else set()
+        dates_dense    = set(dense_obs["date"].unique()) if len(dense_obs) else set()
+        dates_activity = set(activity["date"].unique())  if len(activity)  else set()
         dates = sorted(dates_dense | dates_activity)
 
         logger.info(
             "Temporal data: %d dates, %d dense obs rows, %d station obs rows",
-            len(dates),
-            len(dense_obs),
-            len(point_obs),
+            len(dates), len(dense_obs), len(point_obs),
         )
         return TemporalData(
             dense_obs=dense_obs,
@@ -463,87 +472,122 @@ class SpatiotemporalDataset:
         return df
 
     def _load_dense_obs(self) -> pd.DataFrame:
-        """Load gridded observations, aggregate to daily, rename to standard cols."""
+        """Load gridded satellite observations averaged over the overpass window.
+
+        All retrievals with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per (grid_id, date). This window mean is more
+        robust than single-hour matching and was recommended by thesis examiners.
+        """
         path = self.ts_dir / self.dense_obs_file
         logger.info("Loading dense observations from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(df[self.dense_obs_timestamp_col]).dt.date
+        ts = pd.to_datetime(df[self.dense_obs_timestamp_col]).dt.floor("h")
+        df["date"] = ts.dt.date
+        df["hour"]  = ts.dt.hour
         df = df.dropna(subset=[self.dense_obs_value_col])
         df = df[df[self.dense_obs_value_col] > 0]
 
-        daily = (
-            df.groupby(["grid_id", "date"])[self.dense_obs_value_col]
-            .mean()
+        # Keep only observations within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        out = (
+            df.groupby(["grid_id", "date"])
+            .agg(obs_dense=(self.dense_obs_value_col, "mean"))
             .reset_index()
-            .rename(columns={self.dense_obs_value_col: "obs_dense"})
         )
         logger.info(
-            "Dense obs: %d rows, %d unique dates, %d grid cells",
-            len(daily),
-            daily["date"].nunique(),
-            daily["grid_id"].nunique(),
+            "Dense obs: %d rows, %d unique dates, %d grid cells "
+            "(window %02d:00–%02d:00)",
+            len(out),
+            out["date"].nunique(),
+            out["grid_id"].nunique(),
+            self.overpass_window_start,
+            self.overpass_window_end,
         )
-        return daily
+        return out
 
     def _load_point_obs(self) -> pd.DataFrame:
-        """Load station observations, aggregate to daily, rename to standard cols."""
+        """Load station observations averaged over the overpass window.
+
+        Readings with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per (station_id, date). Consistent with the
+        dense-obs window mean so both inputs represent the same time-of-day.
+        """
         path = self.ts_dir / self.point_obs_file
         logger.info("Loading point observations from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(
-            df[self.point_obs_timestamp_col], utc=True, errors="coerce"
-        ).dt.date
-        df = df.dropna(subset=["date", self.point_obs_value_col])
+        ts = pd.to_datetime(df[self.point_obs_timestamp_col], utc=True, errors="coerce")
+        df["date"] = ts.dt.date
+        df["hour"]  = ts.dt.hour
+        df = df.dropna(subset=["date", "hour", self.point_obs_value_col])
         df = df[df[self.point_obs_value_col] > 0]
 
-        daily = (
-            df.groupby([self.point_obs_station_col, "grid_id", "date"])[self.point_obs_value_col]
-            .mean()
+        # Keep only readings within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        out = (
+            df.groupby([self.point_obs_station_col, "grid_id", "date"])
+            .agg(obs_value=(self.point_obs_value_col, "mean"))
             .reset_index()
-            .rename(columns={
-                self.point_obs_station_col: "station_id",
-                self.point_obs_value_col: "obs_value",
-            })
+            .rename(columns={self.point_obs_station_col: "station_id"})
         )
         logger.info(
-            "Point obs: %d rows, %d stations",
-            len(daily),
-            daily["station_id"].nunique(),
+            "Point obs (window %02d:00–%02d:00 mean): %d rows, %d stations",
+            self.overpass_window_start,
+            self.overpass_window_end,
+            len(out),
+            out["station_id"].nunique(),
         )
-        return daily
+        return out
 
     def _load_activity_forcing(self) -> pd.DataFrame:
-        """Load activity time series and compute normalised daily anomaly.
+        """Load traffic volume averaged over the overpass window per day.
 
-        Anomaly: Δ(t) = (daily_mean − period_mean) / period_mean
-        Positive Δ → above-average activity → positive forcing on pollutant.
+        Readings with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per date. Anomaly Δ(t) = (window_mean −
+        period_mean) / period_mean captures day-to-day traffic variation
+        during the satellite overpass window.
         """
         path = self.ts_dir / self.activity_file
         logger.info("Loading activity forcing from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(
-            df[self.activity_timestamp_col], errors="coerce"
-        ).dt.date
-        df = df.dropna(subset=["date", self.activity_value_col])
+        ts = pd.to_datetime(df[self.activity_timestamp_col], errors="coerce")
+        df["date"] = ts.dt.date
+        df["hour"] = ts.dt.hour
+        df = df.dropna(subset=["date", "hour", self.activity_value_col])
 
-        daily = (
-            df.groupby("date")[self.activity_value_col]
-            .mean()
+        # Keep only readings within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        hourly = (
+            df.groupby("date")
+            .agg(activity_mean=(self.activity_value_col, "mean"))
             .reset_index()
-            .rename(columns={self.activity_value_col: "activity_mean"})
         )
-        period_mean = daily["activity_mean"].mean()
-        daily["delta_activity"] = (
-            (daily["activity_mean"] - period_mean) / (period_mean + 1e-9)
+        period_mean = hourly["activity_mean"].mean()
+        hourly["delta_activity"] = (
+            (hourly["activity_mean"] - period_mean) / (period_mean + 1e-9)
         )
         logger.info(
-            "Activity forcing: %d days, period mean=%.1f",
-            len(daily), period_mean,
+            "Activity forcing (window %02d:00–%02d:00 mean): %d days, period mean=%.1f",
+            self.overpass_window_start,
+            self.overpass_window_end,
+            len(hourly),
+            period_mean,
         )
-        return daily[["date", "activity_mean", "delta_activity"]]
+        return hourly[["date", "activity_mean", "delta_activity"]]
 
     def _load_met_forcing(self) -> pd.DataFrame:
         """Load meteorological forcing and compute per-cell scalar W(s,t).
