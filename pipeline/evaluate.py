@@ -136,11 +136,42 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
                 float(pred_annual_mean - atmos_vals).mean() if False else
                 float((pred_annual_mean - atmos_vals).mean()))
 
-    # Calibration metrics
+    # Conformal calibration — leave-one-station-out correction factor.
+    # Uses EPA validation observations to estimate a scale factor q̂ such that
+    # prediction intervals achieve (1-α) empirical coverage at station locations.
+    station_ids = epa_eval["station_id"].values
+    q_hat_95 = model.calibrate_intervals_conformal(
+        y_obs=y_obs,
+        t_idx=epa_eval["t_idx"].values,
+        loc_idx=epa_eval["loc_idx"].values,
+        alpha=0.05,
+        station_ids=station_ids,
+    )
+    q_hat_80 = model.calibrate_intervals_conformal(
+        y_obs=y_obs,
+        t_idx=epa_eval["t_idx"].values,
+        loc_idx=epa_eval["loc_idx"].values,
+        alpha=0.20,
+        station_ids=station_ids,
+    )
+    logger.info("Conformal correction factors: q̂(95%%)=%.3f  q̂(80%%)=%.3f", q_hat_95, q_hat_80)
+
+    # Calibrated intervals (uncalibrated × q̂)
+    y_std_calibrated = y_std_hyb * q_hat_95
+    pd.DataFrame([{
+        "q_hat_95": round(q_hat_95, 4),
+        "q_hat_80": round(q_hat_80, 4),
+        "sigma2_obs": model._sigma2_obs,
+    }]).to_csv(output_dir / "conformal_factors.csv", index=False)
+
+    # Calibration metrics — report both raw and conformally calibrated
     calibration = evaluator.compute_calibration(y_obs, y_hyb, y_std_hyb)
-    logger.info("Calibration: coverage_95=%.3f  interval_width=%.3f  ISS=%.4f  CRPS=%.4f",
-                calibration.coverage["95%"], calibration.mean_interval_width,
-                calibration.interval_skill_score, calibration.crps)
+    calibration_cal = evaluator.compute_calibration(y_obs, y_hyb, y_std_calibrated)
+    logger.info("Calibration (raw):    coverage_95=%.3f  width=%.3f  CRPS=%.4f",
+                calibration.coverage["95%"], calibration.mean_interval_width, calibration.crps)
+    logger.info("Calibration (conf.):  coverage_95=%.3f  width=%.3f  CRPS=%.4f",
+                calibration_cal.coverage["95%"], calibration_cal.mean_interval_width,
+                calibration_cal.crps)
     pd.DataFrame([{
         "coverage_50":    calibration.coverage["50%"],
         "coverage_80":    calibration.coverage["80%"],
@@ -149,11 +180,15 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
         "interval_width": calibration.mean_interval_width,
         "iss":            calibration.interval_skill_score,
         "crps":           calibration.crps,
+        "conf_coverage_95":    calibration_cal.coverage["95%"],
+        "conf_interval_width": calibration_cal.mean_interval_width,
+        "conf_crps":           calibration_cal.crps,
+        "q_hat_95":       round(q_hat_95, 4),
     }]).to_csv(output_dir / "calibration_metrics.csv", index=False)
 
-    # Hybrid residual diagnostic figure
+    # Hybrid residual diagnostic figure — use calibrated std for the interval plot
     evaluator.diagnostic_plots(
-        y_true=y_obs, y_pred=y_hyb, y_std=y_std_hyb,
+        y_true=y_obs, y_pred=y_hyb, y_std=y_std_calibrated,
         save_path=fig_dir / "hybrid_residual_diagnostics.png",
     )
 
@@ -187,12 +222,12 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
     else:
         logger.warning("Not enough stations for LOOCV (%d)", len(station_annual))
 
-    # Model summary report — pass hybrid predictions + uncertainty so that
-    # probabilistic calibration metrics appear in the summary
+    # Model summary report — use conformally calibrated std so reported
+    # coverage figures are for the corrected (publishable) intervals
     report = evaluator.summary_report(
         y_true=y_obs,
         y_pred=y_hyb,
-        y_std=y_std_hyb,
+        y_std=y_std_calibrated,
     )
     (output_dir / "model_summary.txt").write_text(report)
 
@@ -202,7 +237,7 @@ def evaluate_model(model, temporal, static, hybrid_pred, epa_eval, args,
         gam_temporal_metrics=gam_temporal_metrics,
         hybrid_metrics=hybrid_metrics,
         loocv_metrics=cv_metrics if cv_df is not None else None,
-        calibration=calibration,
+        calibration=calibration_cal,   # use conformally calibrated metrics
         output_dir=output_dir,
     )
 

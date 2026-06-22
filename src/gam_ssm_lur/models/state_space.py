@@ -385,8 +385,12 @@ class StateSpaceModel:
         from scipy import stats
         z_score = stats.norm.ppf((1 + confidence_level) / 2)
         
-        # Smoothed means are the predictions
-        smoothed_means = self.smoother_result_.smoothed_means
+        # Smoothed means are the predictions; add forcing contribution back
+        # B_ was estimated by OLS and subtracted from observations before EM,
+        # so it must be added back here to reconstruct the full prediction.
+        smoothed_means = self.smoother_result_.smoothed_means.copy()
+        if self.B_ is not None and self._forcing_matrix is not None:
+            smoothed_means += self._forcing_matrix @ self.B_.T  # (T, k)
         smoothed_covs = self.smoother_result_.smoothed_covariances
         
         # Compute standard deviations
@@ -648,6 +652,8 @@ class StateSpaceModel:
                     'initial_cov': self.initial_cov_,
                     'obs_dim': self._obs_dim,
                     'T_len': self._T_len,
+                    'B': self.B_,
+                    'forcing_matrix': self._forcing_matrix,
                 },
                 'em_result': {
                     'log_likelihoods': self.em_result_.log_likelihoods,
@@ -675,6 +681,8 @@ class StateSpaceModel:
         model.initial_cov_ = data['fitted']['initial_cov']
         model._obs_dim = data['fitted']['obs_dim']
         model._T_len = data['fitted']['T_len']
+        model.B_ = data['fitted'].get('B', None)
+        model._forcing_matrix = data['fitted'].get('forcing_matrix', None)
         model.is_fitted_ = True
 
         if 'em_result' in data:
