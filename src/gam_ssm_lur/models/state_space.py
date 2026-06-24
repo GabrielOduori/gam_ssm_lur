@@ -175,6 +175,7 @@ class StateSpaceModel:
         diagonal_covariances: bool = True,
         forcing_coefficients: Optional[NDArray] = None,
         random_state: Optional[int] = None,
+        max_eigenvalue: float = 0.98,
     ):
         self.state_dim = state_dim
         self.em_max_iter = em_max_iter
@@ -187,13 +188,20 @@ class StateSpaceModel:
         self.diagonal_covariances = diagonal_covariances
         self.forcing_coefficients = forcing_coefficients
         self.random_state = random_state
+        # Maximum spectral radius allowed for the dynamic-block transition
+        # matrix (Hamilton, 1994, Ch. 1 stationarity condition). Lower values
+        # more aggressively suppress within-sample drift over the study
+        # window at the cost of a less flexible AR fit.
+        self.max_eigenvalue = max_eigenvalue
 
         # Fitted attributes
         self.T_: Optional[NDArray] = None
-        self.Z_: Optional[NDArray] = None
+        self.Z_: Optional[NDArray] = None      # (obs_dim, state_dim) or, with
+                                                # regression effects, (T, obs_dim, aug_dim)
         self.Q_: Optional[NDArray] = None
         self.H_: Optional[NDArray] = None
-        self.B_: Optional[NDArray] = None      # forcing coefficient matrix (n_locs, n_forcing)
+        self.B_: Optional[NDArray] = None      # B_tilde, jointly estimated (state_dim, n_forcing)
+        self.beta_: Optional[float] = None     # GAM-regression coefficient, jointly estimated
         self.initial_mean_: Optional[NDArray] = None
         self.initial_cov_: Optional[NDArray] = None
 
@@ -202,15 +210,41 @@ class StateSpaceModel:
         self.filter_result_: Optional[FilterResult] = None
         self.smoother_result_: Optional[SmootherResult] = None
         self._forcing_matrix: Optional[NDArray] = None   # stored for forecast()
+        self._g_tilde: Optional[NDArray] = None           # projected GAM regressor, stored for forecast()
+        self._dynamic_dim: Optional[int] = None           # size of the alpha (dynamic) sub-block
 
         self.is_fitted_ = False
         self._obs_dim: Optional[int] = None
         self._T_len: Optional[int] = None
-        
+
+    def _build_em_estimator(self, dynamic_dim: Optional[int] = None) -> EMEstimator:
+        """Construct an EMEstimator with this model's shared configuration.
+
+        Used by both the plain (dynamics-only) and augmented (regression-
+        effects) fit paths so the EM hyperparameters can't drift apart between
+        them. ``dynamic_dim`` is left as ``None`` for the plain path (all
+        dimensions dynamic) and set to the alpha-block size for the augmented
+        path (Harvey, 1989, Ch. 3.3 fixed-effect states).
+        """
+        return EMEstimator(
+            max_iterations=self.em_max_iter,
+            tolerance=self.em_tol,
+            regularization=self.regularization,
+            estimate_T=self.estimate_T,
+            estimate_Q=self.estimate_Q,
+            estimate_H=self.estimate_H,
+            diagonal_Q=self.diagonal_covariances,
+            diagonal_H=self.diagonal_covariances,
+            verbose=True,
+            dynamic_dim=dynamic_dim,
+            max_eigenvalue=self.max_eigenvalue,
+        )
+
     def fit(
         self,
         observations: Union[NDArray, pd.DataFrame],
         forcing_matrix: Optional[Union[NDArray, pd.DataFrame]] = None,
+        g_tilde: Optional[NDArray] = None,
         T_init: Optional[NDArray] = None,
         Q_init: Optional[NDArray] = None,
         H_init: Optional[NDArray] = None,
@@ -219,23 +253,27 @@ class StateSpaceModel:
 
         Parameters
         ----------
-        observations : array-like of shape (T, n_locations)
-            Observation matrix (typically GAM residuals per grid cell).
+        observations : array-like of shape (T, obs_dim)
+            Score-space observations (e.g. the top-k SVD scores of the
+            calibrated satellite field).
         forcing_matrix : array-like of shape (T, n_forcing), optional
-            External forcing covariates entering the transition equation::
+            External forcing covariates (e.g. traffic anomaly, wind), entering
+            the observation equation as::
 
-                α_{t+1} = T α_t + B u_t + R η_t
+                y_t = alpha_t + B_tilde @ u_t (+ beta * g_tilde) + noise
 
-            Each column is one covariate (e.g. daily traffic anomaly,
-            city-wide wind index). B is estimated by OLS from the
-            forcing signals and the residual observations before EM.
-            If None, no external forcing is applied (B = 0).
-        T_init : NDArray, optional
-            Initial transition matrix.
-        Q_init : NDArray, optional
-            Initial process noise covariance.
-        H_init : NDArray, optional
-            Initial observation noise covariance.
+            B_tilde (obs_dim x n_forcing) is estimated *jointly* with alpha_t's
+            dynamics via the augmented-state EM (Harvey, 1989, Ch. 3.3; Watson
+            & Engle, 1983) -- not pre-estimated by OLS and subtracted, which
+            silently discarded B_tilde's estimation error into the dynamics.
+        g_tilde : array-like of shape (obs_dim,), optional
+            A known, time-invariant regressor (e.g. a static GAM baseline,
+            projected into score-space) entering as ``beta * g_tilde``, with
+            beta jointly estimated alongside B_tilde and the dynamics rather
+            than assumed (e.g. fixed at 1).
+        T_init, Q_init, H_init : NDArray, optional
+            Initial transition / process-noise / observation-noise matrices
+            for the *dynamic* (alpha) sub-block only.
 
         Returns
         -------
@@ -252,8 +290,9 @@ class StateSpaceModel:
 
         self._T_len, self._obs_dim = observations.shape
         state_dim = self.state_dim or self._obs_dim
+        self._dynamic_dim = state_dim  # stored so predict()/forecast() know the alpha-block size
 
-        # ── Handle external forcing ──────────────────────────────────────────
+        has_beta = g_tilde is not None
         if forcing_matrix is not None:
             if isinstance(forcing_matrix, pd.DataFrame):
                 forcing_matrix = forcing_matrix.values
@@ -263,60 +302,129 @@ class StateSpaceModel:
                     f"forcing_matrix has {forcing_matrix.shape[0]} rows but "
                     f"observations has {self._T_len} time steps."
                 )
-            self._forcing_matrix = forcing_matrix
-
-            # Estimate B via OLS: obs_t ≈ B u_t  (mean across locations)
-            if self.forcing_coefficients is not None:
-                self.B_ = np.asarray(self.forcing_coefficients)
-            else:
-                # OLS on mean anomaly: shape (T,) ~ (T, n_forcing)
-                obs_mean = np.nanmean(observations, axis=1, keepdims=True)  # (T,1)
-                U = forcing_matrix  # (T, n_forcing)
-                U_aug = np.column_stack([np.ones(self._T_len), U])
-                coeffs, _, _, _ = np.linalg.lstsq(U_aug, obs_mean, rcond=None)
-                # coeffs shape (n_forcing+1, 1); skip intercept, broadcast to (n_locs, n_forcing)
-                b_vec = coeffs[1:, 0]  # (n_forcing,)
-                self.B_ = np.tile(b_vec, (self._obs_dim, 1))  # (n_locs, n_forcing)
-                logger.info(
-                    "Forcing coefficients estimated by OLS: %s",
-                    np.round(b_vec, 4),
-                )
-
-            # Remove forcing signal from observations before EM
-            # so EM sees only the AR residual
-            forcing_mean = (forcing_matrix @ self.B_.T).T  # (n_locs, T) → transpose → (T, n_locs)
-            # Actually: B_ is (n_locs, n_forcing), u_t is (n_forcing,)
-            # forcing contribution at t: B_ @ u_t → (n_locs,)
-            forcing_contrib = np.stack(
-                [self.B_ @ forcing_matrix[t] for t in range(self._T_len)]
-            )  # (T, n_locs)
-            observations_deforced = observations - forcing_contrib
+            n_forcing = forcing_matrix.shape[1]
         else:
-            self._forcing_matrix = None
-            self.B_ = None
-            observations_deforced = observations
-        
+            n_forcing = 0
+        self._forcing_matrix = forcing_matrix
+        self._g_tilde = np.asarray(g_tilde, dtype=float) if has_beta else None
+
+        if not has_beta and n_forcing == 0:
+            # No regression effects requested: plain dynamics-only model,
+            # unchanged from the original (pre-augmentation) behaviour.
+            return self._fit_plain(observations, state_dim, T_init, Q_init, H_init)
+
+        # ── Augmented-state joint estimation ────────────────────────────────
+        # State: [alpha (state_dim); beta (1 if has_beta); vec(B_tilde)
+        # (state_dim * n_forcing)]. beta and vec(B_tilde) are "fixed effect"
+        # states with identity transition and zero process noise (Harvey,
+        # 1989, Ch. 3.3), estimated jointly with alpha's dynamics by the
+        # augmented EM rather than pre-estimated by OLS and subtracted.
+        beta_col = state_dim if has_beta else None
+        b_tilde_start = state_dim + (1 if has_beta else 0)
+        aug_dim = state_dim + (1 if has_beta else 0) + state_dim * n_forcing
+
+        Z_seq = np.zeros((self._T_len, self._obs_dim, aug_dim))
+        eye_block = np.eye(self._obs_dim, state_dim)
+        for t in range(self._T_len):
+            Zt = Z_seq[t]
+            Zt[:, :state_dim] = eye_block
+            if has_beta:
+                Zt[:, beta_col] = self._g_tilde
+            for j in range(n_forcing):
+                start = b_tilde_start + j * state_dim
+                Zt[:, start:start + state_dim] = forcing_matrix[t, j] * eye_block
+
         logger.info(
-            "Fitting SSM: T=%d, obs_dim=%d, state_dim=%d, mode=%s, forcing=%s",
-            self._T_len, self._obs_dim, state_dim, self.scalability_mode,
-            "yes" if self._forcing_matrix is not None else "no",
+            "Fitting SSM with joint regression effects: T=%d, obs_dim=%d, "
+            "state_dim=%d, aug_dim=%d (beta=%s, n_forcing=%d), mode=dense (forced)",
+            self._T_len, self._obs_dim, state_dim, aug_dim, has_beta, n_forcing,
         )
 
-        # Create EM estimator — fit on de-forced observations
-        em = EMEstimator(
-            max_iterations=self.em_max_iter,
-            tolerance=self.em_tol,
-            regularization=self.regularization,
-            estimate_T=self.estimate_T,
-            estimate_Q=self.estimate_Q,
-            estimate_H=self.estimate_H,
-            diagonal_Q=self.diagonal_covariances,
-            diagonal_H=self.diagonal_covariances,
-            verbose=True,
-        )
+        # Time-varying Z requires dense mode (KalmanFilter constraint); aug_dim
+        # is small (state_dim plus a handful of regression effects) so this is
+        # computationally trivial regardless of the configured scalability_mode.
+        em = self._build_em_estimator(dynamic_dim=state_dim)
 
         self.em_result_ = em.fit(
-            observations=observations_deforced,
+            observations=observations,
+            state_dim=aug_dim,
+            obs_dim=self._obs_dim,
+            T_init=T_init,
+            Q_init=Q_init,
+            H_init=H_init,
+            Z=Z_seq,
+            scalability_mode="dense",
+        )
+
+        self.T_ = self.em_result_.T
+        self.Z_ = Z_seq
+        self.Q_ = self.em_result_.Q
+        self.H_ = self.em_result_.H
+        self.initial_mean_ = self.em_result_.initial_mean
+        self.initial_cov_ = self.em_result_.initial_covariance
+
+        # Point estimates for the fixed-effect states: average the smoothed
+        # mean across t (they should be ~constant; averaging guards against
+        # small numerical drift rather than relying on a single timestep).
+        smoothed = self.em_result_.smoothed_states
+        self.beta_ = float(smoothed[:, beta_col].mean()) if has_beta else None
+        if n_forcing > 0:
+            b_flat = smoothed[:, b_tilde_start:].mean(axis=0)  # (n_forcing*state_dim,)
+            self.B_ = b_flat.reshape(n_forcing, state_dim).T  # (state_dim, n_forcing)
+        else:
+            self.B_ = None
+        logger.info(
+            "Jointly estimated beta=%s, B_tilde=%s",
+            None if self.beta_ is None else round(self.beta_, 4),
+            None if self.B_ is None else np.round(self.B_, 4).tolist(),
+        )
+
+        self.kf_ = KalmanFilter(
+            state_dim=aug_dim,
+            obs_dim=self._obs_dim,
+            mode="dense",
+            regularization=self.regularization,
+        )
+        self.kf_.initialize(
+            T=self.T_, Z=self.Z_, Q=self.Q_, H=self.H_,
+            initial_mean=self.initial_mean_,
+            initial_covariance=self.initial_cov_,
+        )
+        self.filter_result_ = self.kf_.filter(observations)
+        smoother = RTSSmoother(self.kf_)
+        self.smoother_result_ = smoother.smooth(self.filter_result_)
+
+        self.is_fitted_ = True
+        logger.info(
+            f"SSM fitted. Converged: {self.em_result_.converged}, "
+            f"Iterations: {self.em_result_.n_iterations}, "
+            f"Final LL: {self.em_result_.log_likelihoods[-1]:.4e}"
+        )
+        return self
+
+    def _fit_plain(
+        self,
+        observations: NDArray,
+        state_dim: int,
+        T_init: Optional[NDArray],
+        Q_init: Optional[NDArray],
+        H_init: Optional[NDArray],
+    ) -> "StateSpaceModel":
+        """Fit with no regression effects: dynamics-only EM (original behaviour)."""
+        self._forcing_matrix = None
+        self._g_tilde = None
+        self.B_ = None
+        self.beta_ = None
+
+        logger.info(
+            "Fitting SSM (no regression effects): T=%d, obs_dim=%d, state_dim=%d, mode=%s",
+            self._T_len, self._obs_dim, state_dim, self.scalability_mode,
+        )
+
+        em = self._build_em_estimator()
+
+        self.em_result_ = em.fit(
+            observations=observations,
             state_dim=state_dim,
             obs_dim=self._obs_dim,
             T_init=T_init,
@@ -325,7 +433,6 @@ class StateSpaceModel:
             scalability_mode=self.scalability_mode,
         )
 
-        # Store estimated parameters
         self.T_ = self.em_result_.T
         self.Z_ = np.eye(self._obs_dim, state_dim)
         self.Q_ = self.em_result_.Q
@@ -333,7 +440,6 @@ class StateSpaceModel:
         self.initial_mean_ = self.em_result_.initial_mean
         self.initial_cov_ = self.em_result_.initial_covariance
 
-        # Create Kalman filter with estimated parameters
         self.kf_ = KalmanFilter(
             state_dim=state_dim,
             obs_dim=self._obs_dim,
@@ -341,27 +447,20 @@ class StateSpaceModel:
             regularization=self.regularization,
         )
         self.kf_.initialize(
-            T=self.T_,
-            Z=self.Z_,
-            Q=self.Q_,
-            H=self.H_,
+            T=self.T_, Z=self.Z_, Q=self.Q_, H=self.H_,
             initial_mean=self.initial_mean_,
             initial_covariance=self.initial_cov_,
         )
-
-        # Run final filter and smoother on de-forced observations
-        self.filter_result_ = self.kf_.filter(observations_deforced)
+        self.filter_result_ = self.kf_.filter(observations)
         smoother = RTSSmoother(self.kf_)
         self.smoother_result_ = smoother.smooth(self.filter_result_)
-        
+
         self.is_fitted_ = True
-        
         logger.info(
             f"SSM fitted. Converged: {self.em_result_.converged}, "
             f"Iterations: {self.em_result_.n_iterations}, "
             f"Final LL: {self.em_result_.log_likelihoods[-1]:.4e}"
         )
-        
         return self
         
     def predict(
@@ -381,17 +480,27 @@ class StateSpaceModel:
             Container with predictions and intervals
         """
         self._check_fitted()
-        
+
         from scipy import stats
         z_score = stats.norm.ppf((1 + confidence_level) / 2)
-        
-        # Smoothed means are the predictions; add forcing contribution back
-        # B_ was estimated by OLS and subtracted from observations before EM,
-        # so it must be added back here to reconstruct the full prediction.
-        smoothed_means = self.smoother_result_.smoothed_means.copy()
-        if self.B_ is not None and self._forcing_matrix is not None:
-            smoothed_means += self._forcing_matrix @ self.B_.T  # (T, k)
-        smoothed_covs = self.smoother_result_.smoothed_covariances
+
+        # Return only the dynamic (alpha) sub-block. With regression effects,
+        # beta and B_tilde are separate, jointly-estimated "fixed effect"
+        # states (see self.beta_, self.B_) -- they are not subtracted from
+        # the observations beforehand, so unlike the old OLS-based design
+        # there is nothing to "add back" here. Callers needing the full
+        # score-level reconstruction (alpha_t + beta*g_tilde + B_tilde@u_t)
+        # should combine self.beta_/self.B_/self._g_tilde/self._forcing_matrix
+        # with this alpha_t themselves (e.g. hybrid.py reconstructs the full
+        # per-location field using the exact, unprojected GAM baseline rather
+        # than its score-space projection).
+        d = self._dynamic_dim
+        smoothed_means = self.smoother_result_.smoothed_means[:, :d].copy()
+        smoothed_covs_full = self.smoother_result_.smoothed_covariances
+        if smoothed_covs_full.ndim == 3:
+            smoothed_covs = smoothed_covs_full[:, :d, :d]
+        else:
+            smoothed_covs = smoothed_covs_full[:, :d]
         
         # Compute standard deviations
         if smoothed_covs.ndim == 2:
@@ -411,9 +520,9 @@ class StateSpaceModel:
             lower=lower,
             upper=upper,
             smoothed_states=smoothed_means,
-            filtered_states=self.filter_result_.filtered_means,
+            filtered_states=self.filter_result_.filtered_means[:, :d],
         )
-        
+
     def forecast(
         self,
         n_steps: int,
@@ -434,28 +543,35 @@ class StateSpaceModel:
             Forecasted values with uncertainty
         """
         self._check_fitted()
-        
+
         from scipy import stats
         z_score = stats.norm.ppf((1 + confidence_level) / 2)
-        
-        # Start from last filtered state
-        current_mean = self.filter_result_.filtered_means[-1]
-        current_cov = self.filter_result_.filtered_covariances[-1]
-        
-        if current_cov.ndim == 1:
-            current_cov = np.diag(current_cov)
-            
+
+        # Forecast only the dynamic (alpha) sub-block, consistent with
+        # predict(). beta/B_tilde are fixed-effect constants with no further
+        # dynamics to extrapolate, and forecasting them would require future
+        # values of g_tilde/forcing that this method does not take as input.
+        d = self._dynamic_dim
+        T_dd = self.T_[:d, :d]
+        Q_dd = self.Q_[:d, :d]
+        Z_dd = np.eye(self._obs_dim, d)
+
+        # Start from last filtered state (alpha-block only)
+        current_mean = self.filter_result_.filtered_means[-1][:d]
+        last_cov = self.filter_result_.filtered_covariances[-1]
+        current_cov = last_cov[:d, :d] if last_cov.ndim == 2 else np.diag(last_cov[:d])
+
         # Forecast storage
         forecast_means = np.zeros((n_steps, self._obs_dim))
         forecast_covs = np.zeros((n_steps, self._obs_dim, self._obs_dim))
-        
+
         for t in range(n_steps):
             # Predict step
-            current_mean = self.T_ @ current_mean
-            current_cov = self.T_ @ current_cov @ self.T_.T + self.Q_
-            
-            forecast_means[t] = self.Z_ @ current_mean
-            forecast_covs[t] = self.Z_ @ current_cov @ self.Z_.T + self.H_
+            current_mean = T_dd @ current_mean
+            current_cov = T_dd @ current_cov @ T_dd.T + Q_dd
+
+            forecast_means[t] = Z_dd @ current_mean
+            forecast_covs[t] = Z_dd @ current_cov @ Z_dd.T + self.H_
             
         # Compute intervals
         std = np.sqrt(np.diagonal(forecast_covs, axis1=1, axis2=2))
@@ -601,11 +717,15 @@ class StateSpaceModel:
         missing_mask = np.isnan(obs)
         obs_clean = np.where(missing_mask, 0.0, obs) if missing_mask.any() else obs
         missing_mask = missing_mask if missing_mask.any() else None
-        
+
+        # Time-varying Z (regression effects) requires dense mode regardless
+        # of the originally configured scalability_mode -- fit() forces this
+        # too; mirrored here so reloaded models filter identically.
+        mode = "dense" if np.asarray(self.Z_).ndim == 3 else self.scalability_mode
         kf = KalmanFilter(
             state_dim=self.T_.shape[0],
             obs_dim=self._obs_dim,
-            mode=self.scalability_mode,
+            mode=mode,
             regularization=self.regularization,
         )
         kf.initialize(
@@ -654,6 +774,9 @@ class StateSpaceModel:
                     'T_len': self._T_len,
                     'B': self.B_,
                     'forcing_matrix': self._forcing_matrix,
+                    'beta': self.beta_,
+                    'g_tilde': self._g_tilde,
+                    'dynamic_dim': self._dynamic_dim,
                 },
                 'em_result': {
                     'log_likelihoods': self.em_result_.log_likelihoods,
@@ -683,6 +806,9 @@ class StateSpaceModel:
         model._T_len = data['fitted']['T_len']
         model.B_ = data['fitted'].get('B', None)
         model._forcing_matrix = data['fitted'].get('forcing_matrix', None)
+        model.beta_ = data['fitted'].get('beta', None)
+        model._g_tilde = data['fitted'].get('g_tilde', None)
+        model._dynamic_dim = data['fitted'].get('dynamic_dim', model._obs_dim)
         model.is_fitted_ = True
 
         if 'em_result' in data:

@@ -274,3 +274,88 @@ class TestNumericalStability:
         for t in range(10, T_len, 10):
             result = kf.filter(observations[:t])
             assert np.isfinite(result.log_likelihood)
+
+    def test_time_varying_Z_matches_hand_computed_update(self):
+        """Time-varying Z_t: verify against a hand-computed Kalman update.
+
+        state_dim=2, obs_dim=1. Z_0 observes state[0] only; Z_1 observes
+        state[1] only. With near-zero Q/H, the filter should match an exact
+        hand-derived Kalman update at each step (Durbin & Koopman, 2012,
+        Sec. 3.1, eqs. 3.4-3.5, generalised to time-varying Z_t).
+        """
+        state_dim, obs_dim = 2, 1
+        T = np.eye(state_dim)
+        Z_seq = np.array([
+            [[1.0, 0.0]],   # t=0: observe state[0]
+            [[0.0, 1.0]],   # t=1: observe state[1]
+        ])
+        Q = np.eye(state_dim) * 1e-8
+        H = np.eye(obs_dim) * 1e-8
+        initial_mean = np.zeros(state_dim)
+        initial_cov = np.eye(state_dim)
+
+        kf = KalmanFilter(state_dim=state_dim, obs_dim=obs_dim, mode='dense', regularization=0.0)
+        kf.initialize(T=T, Z=Z_seq, Q=Q, H=H,
+                      initial_mean=initial_mean, initial_covariance=initial_cov)
+
+        observations = np.array([[5.0], [-3.0]])
+        result = kf.filter(observations)
+
+        # Hand-computed step 0: pred_mean=[0,0], pred_cov=I, Z_0=[1,0]
+        # innovation v0 = 5 - 0 = 5; F0 = 1*1*1 + 1e-8 ~= 1
+        # K0 = P Z0' / F0 = [1,0]' / 1 = [1,0]
+        # filtered_mean0 = [0,0] + [1,0]*5 = [5, 0]
+        np.testing.assert_allclose(result.filtered_means[0], [5.0, 0.0], atol=1e-4)
+
+        # Hand-computed step 1: pred_mean = T @ filtered_mean0 = [5,0] (T=I)
+        # pred_cov = filtered_cov0 + Q ~= filtered_cov0 (Q~0)
+        # filtered_cov0 = (I - K0 Z0) P0 = (I - [[1,0],[0,0]]) I = [[0,0],[0,1]]
+        # so pred_cov1 = [[0,0],[0,1]]; Z_1=[0,1]
+        # innovation v1 = -3 - [0,1]@[5,0] = -3 - 0 = -3
+        # F1 = [0,1] pred_cov1 [0,1]' + 1e-8 ~= 1
+        # K1 = pred_cov1 @ [0,1]' / F1 = [0,1]' / 1 = [0,1]
+        # filtered_mean1 = [5,0] + [0,1]*(-3) = [5,-3]
+        np.testing.assert_allclose(result.filtered_means[1], [5.0, -3.0], atol=1e-4)
+
+    def test_time_varying_Z_rejects_non_dense_mode(self):
+        """Time-varying Z should raise outside dense mode, not silently misbehave."""
+        kf = KalmanFilter(state_dim=2, obs_dim=1, mode='diagonal')
+        Z_seq = np.zeros((3, 1, 2))
+        with pytest.raises(ValueError):
+            kf.initialize(
+                T=np.eye(2), Z=Z_seq, Q=np.eye(2), H=np.eye(1),
+            )
+
+    def test_smoother_compatible_with_time_varying_Z(self):
+        """RTSSmoother must work unmodified on a time-varying-Z filter result.
+
+        The smoother's backward recursion (Rauch, Tung & Striebel, 1965) only
+        uses T and the filter's stored means/covariances at each t — it never
+        re-references Z, so a filter run with time-varying Z_t should smooth
+        identically to any other filter result.
+        """
+        state_dim, obs_dim = 2, 1
+        Z_seq = np.array([
+            [[1.0, 0.0]],
+            [[0.0, 1.0]],
+            [[1.0, 0.0]],
+        ])
+        kf = KalmanFilter(state_dim=state_dim, obs_dim=obs_dim, mode='dense')
+        kf.initialize(
+            T=np.eye(state_dim) * 0.95, Z=Z_seq,
+            Q=np.eye(state_dim) * 0.05, H=np.eye(obs_dim) * 0.1,
+        )
+        observations = np.array([[5.0], [-3.0], [2.0]])
+        filter_result = kf.filter(observations)
+
+        smoother = RTSSmoother(kf)
+        smooth_result = smoother.smooth(filter_result)
+
+        assert smooth_result.smoothed_means.shape == (3, state_dim)
+        assert np.all(np.isfinite(smooth_result.smoothed_means))
+        # Smoothed covariance at the final step must equal the filtered
+        # covariance there (no future information left to incorporate).
+        np.testing.assert_allclose(
+            smooth_result.smoothed_covariances[-1],
+            filter_result.filtered_covariances[-1],
+        )

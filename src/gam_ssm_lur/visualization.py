@@ -117,7 +117,7 @@ CMAP_NO2 = "no2_atmos"   # placeholder name — use _no2_cmap_norm() for actual 
 COL_LUR       = "steelblue"  # GAM LUR prior lines / satellite markers
 COL_SSM       = "darkorange" # GAM-SSM lines / uncertainty shading
 COL_OBS       = "black"      # observed station measurements
-ALPHA_MAP     = 0.6
+ALPHA_MAP     = 0.5
 ALPHA_SHADE   = 0.2
 MISSING_KWD   = {"color": "lightgrey", "alpha": ALPHA_MAP}
 
@@ -704,13 +704,6 @@ class SpatialVisualizer:
         -------
         matplotlib.figure.Figure
         """
-        try:
-            import shap
-            logging.getLogger("shap").setLevel(logging.WARNING)
-        except ImportError:
-            logger.warning("shap not installed — skipping SHAP plot")
-            return None
-
         feat_cols = list(gam_model.feature_names_)
         X = X_df[feat_cols].values.astype(float)
 
@@ -721,8 +714,34 @@ class SpatialVisualizer:
         X_bg  = X[bg_idx]
         X_exp = X[exp_idx]
 
-        explainer   = shap.KernelExplainer(gam_model.predict, X_bg)
-        shap_values = explainer.shap_values(X_exp, silent=True)   # (n_exp, n_feat)
+        # SpatialGAM is a strictly additive model (sum of independent
+        # per-feature smooth terms), so its exact Shapley value for feature i
+        # has a closed form requiring no sampling at all:
+        #   SHAP_i(x) = f_i(x_i) - E_background[f_i(X_i)]
+        # (the per-term deviation from its own baseline expectation -- see
+        # Lundberg & Lee, 2017, Sec. 3 "additive feature attribution methods").
+        # This replaces shap.KernelExplainer, which solved this exactly-known
+        # decomposition via expensive coalition sampling (~25 min for n_feat=31,
+        # n_explain=500 on this dataset; this closed-form version is ~instant).
+        try:
+            shap_values = np.column_stack([
+                gam_model.gam_.partial_dependence(term=i, X=X_exp, width=0.95)[0]
+                - gam_model.gam_.partial_dependence(term=i, X=X_bg, width=0.95)[0].mean()
+                for i in range(len(feat_cols))
+            ])
+        except Exception:
+            logger.warning(
+                "Exact additive SHAP computation failed; falling back to "
+                "shap.KernelExplainer (much slower)."
+            )
+            try:
+                import shap
+                logging.getLogger("shap").setLevel(logging.WARNING)
+            except ImportError:
+                logger.warning("shap not installed — skipping SHAP plot")
+                return None
+            explainer   = shap.KernelExplainer(gam_model.predict, X_bg)
+            shap_values = explainer.shap_values(X_exp, silent=True)   # (n_exp, n_feat)
 
         shap_df   = pd.DataFrame(shap_values, columns=feat_cols)
         mean_abs  = shap_df.abs().mean().sort_values(ascending=False)

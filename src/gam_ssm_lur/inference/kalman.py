@@ -172,6 +172,10 @@ class KalmanFilter:
         self.Q: Optional[NDArray] = None
         self.H: Optional[NDArray] = None
         self.R: Optional[NDArray] = None
+
+        # Time-varying observation matrix support (set in initialize())
+        self._time_varying_Z: bool = False
+        self._Z_sequence: Optional[NDArray] = None
         
         # Initial state
         self.initial_mean: Optional[NDArray] = None
@@ -199,13 +203,17 @@ class KalmanFilter:
         initial_covariance: Optional[NDArray] = None,
     ) -> None:
         """Initialize filter with system matrices.
-        
+
         Parameters
         ----------
         T : NDArray
             State transition matrix
         Z : NDArray
-            Observation matrix
+            Observation matrix, shape (obs_dim, state_dim). May also be a
+            sequence of matrices, shape (T_len, obs_dim, state_dim), for
+            models with time-varying observation loadings (e.g. regression
+            effects on known, time-varying covariates; Durbin & Koopman,
+            2012, Sec. 3.1). Time-varying Z is only supported in 'dense' mode.
         Q : NDArray
             Process noise covariance
         H : NDArray
@@ -218,7 +226,21 @@ class KalmanFilter:
             Initial state covariance. Defaults to identity.
         """
         self.T = self._convert_matrix(T)
-        self.Z = self._convert_matrix(Z)
+
+        Z_arr = np.asarray(Z)
+        self._time_varying_Z = Z_arr.ndim == 3
+        if self._time_varying_Z:
+            if self.mode != "dense":
+                raise ValueError(
+                    "Time-varying Z is only supported in 'dense' mode "
+                    f"(got mode={self.mode!r})."
+                )
+            self._Z_sequence = Z_arr  # (T_len, obs_dim, state_dim), stored as-is
+            self.Z = self._Z_sequence[0]  # placeholder; set per-timestep in filter()
+        else:
+            self._Z_sequence = None
+            self.Z = self._convert_matrix(Z)
+
         self.Q = self._convert_matrix(Q)
         self.H = self._convert_matrix(H)
         self.R = self._convert_matrix(R) if R is not None else self._identity()
@@ -505,7 +527,11 @@ class KalmanFilter:
         for t in range(T_len):
             # Prediction step
             pred_mean, pred_cov = self._predict_step(current_mean, current_cov)
-            
+
+            # Select this timestep's observation matrix for time-varying Z
+            if self._time_varying_Z:
+                self.Z = self._Z_sequence[t]
+
             # Handle missing observations
             obs_t = observations[t]
             if missing_mask is not None and missing_mask[t].any():

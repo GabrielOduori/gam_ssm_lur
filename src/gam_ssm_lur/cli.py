@@ -68,7 +68,7 @@ def train() -> None:
     parser.add_argument('--activity-timestamp-col', default='traffic_end_time',
                         help='Timestamp column in activity file')
     parser.add_argument('--met-forcing-file',
-                        default='wind_sector_features_era5land_2023-06_daily.csv',
+                        default='wind_sector_2023-06_daily.csv',
                         help='Meteorological forcing file')
     parser.add_argument('--met-n-sectors', type=int, default=8,
                         help='Number of sectors in met forcing file')
