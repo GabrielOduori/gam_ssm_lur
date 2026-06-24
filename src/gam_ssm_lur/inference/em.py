@@ -144,6 +144,8 @@ class EMEstimator:
         diagonal_Q: bool = False,
         diagonal_H: bool = False,
         verbose: bool = True,
+        dynamic_dim: Optional[int] = None,
+        max_eigenvalue: float = 0.98,
     ):
         self.max_iterations = max_iterations
         self.tolerance = tolerance
@@ -156,8 +158,41 @@ class EMEstimator:
         self.diagonal_Q = diagonal_Q
         self.diagonal_H = diagonal_H
         self.verbose = verbose
-        
+        # If set, only state[:dynamic_dim] has T/Q dynamics; state[dynamic_dim:]
+        # is held at identity transition / zero process noise throughout (Harvey,
+        # 1989, Ch. 3.3 "fixed" regression-effect states). None means "all dims
+        # are dynamic", preserving prior behaviour exactly.
+        self.dynamic_dim = dynamic_dim
+        # Maximum allowed spectral radius (largest |eigenvalue|) of the
+        # dynamic-block transition matrix. The unconstrained M-step estimate
+        # T = S10 @ S00^-1 has no stability guarantee and can return an
+        # explosive matrix when fit on a short series -- a state equation
+        # alpha_{t+1} = T alpha_t + noise is stable iff all eigenvalues of T
+        # lie within the unit circle (Hamilton, 1994, "Time Series Analysis",
+        # Ch. 1, the stationarity condition for VAR(1) processes).
+        self.max_eigenvalue = max_eigenvalue
+
         self.diagnostics_history: List[EMDiagnostics] = []
+
+    def _stabilize_transition(self, T: NDArray) -> NDArray:
+        """Shrink T uniformly if its spectral radius exceeds max_eigenvalue.
+
+        Rescaling by a single scalar factor (rather than clipping individual
+        eigenvalues) preserves T's eigenvector structure -- i.e. the relative
+        dynamics between state dimensions are unchanged, only the overall
+        rate of growth/decay is corrected.
+        """
+        eigvals = np.linalg.eigvals(T)
+        rho = float(np.max(np.abs(eigvals)))
+        if rho > self.max_eigenvalue and rho > 0:
+            shrink = self.max_eigenvalue / rho
+            logger.warning(
+                "Transition matrix spectral radius %.4f exceeded stability "
+                "threshold %.2f; shrinking uniformly by factor %.4f.",
+                rho, self.max_eigenvalue, shrink,
+            )
+            T = T * shrink
+        return T
         
     def _initialize_parameters(
         self,
@@ -180,22 +215,28 @@ class EMEstimator:
         """
         # Observation statistics for initialization
         obs_var = np.var(observations, axis=0).mean()
-        
+
+        d = self.dynamic_dim if self.dynamic_dim is not None else state_dim
+
         # Transition matrix
         if T_init is not None:
             T = T_init.copy()
         else:
-            # Slight shrinkage toward mean (AR(1) coefficient < 1)
-            T = 0.95 * np.eye(state_dim)
-            
+            # Slight shrinkage toward mean (AR(1) coefficient < 1) for the
+            # dynamic block; static block (if any) is exactly identity.
+            T = np.eye(state_dim)
+            T[:d, :d] = 0.95 * np.eye(d)
+
         # Observation matrix (identity for now)
         Z = np.eye(obs_dim, state_dim)
-        
+
         # Process noise covariance
         if Q_init is not None:
             Q = Q_init.copy()
         else:
-            Q = 0.1 * obs_var * np.eye(state_dim)
+            # Static block (if any) gets exactly zero process noise.
+            Q = np.zeros((state_dim, state_dim))
+            Q[:d, :d] = 0.1 * obs_var * np.eye(d)
             
         # Observation noise covariance
         if H_init is not None:
@@ -232,79 +273,120 @@ class EMEstimator:
         self,
         observations: NDArray,
         smoother_result: SmootherResult,
+        Z: Optional[NDArray] = None,
     ) -> Dict[str, NDArray]:
         """Compute sufficient statistics for M-step.
-        
+
+        Parameters
+        ----------
+        Z : NDArray, optional
+            Observation matrix. Either fixed, shape (obs_dim, state_dim), or
+            time-varying, shape (T_len, obs_dim, state_dim). If time-varying,
+            ``Z_t`` must be applied *inside* this per-timestep loop (it cannot
+            be applied afterwards to pooled S11/Sy1, since that pooling would
+            mix contributions from different Z_t -- Durbin & Koopman, 2012,
+            Sec. 3.1). This produces the additional 'S_zaz' and 'S_zay'
+            accumulators used by the H update for both the fixed- and
+            time-varying-Z cases alike.
+
         Returns
         -------
         Dict containing:
-            - 'S11': Σ E[αₜ αₜ']
+            - 'S11': Σ E[αₜ αₜ']  (all t, for diagnostics)
+            - 'S11_trans': Σ E[αₜ αₜ'] over t=1,...,T_len-1 (for Q)
             - 'S10': Σ E[αₜ αₜ₋₁']
             - 'S00': Σ E[αₜ₋₁ αₜ₋₁']
-            - 'Sy1': Σ yₜ E[αₜ']
+            - 'Sy1': Σ yₜ E[αₜ']  (only meaningful when Z is fixed/None)
             - 'Syy': Σ yₜ yₜ'
+            - 'S_zaz': Σ Zₜ E[αₜ αₜ'] Zₜ'
+            - 'S_zay': Σ (Zₜ E[αₜ]) yₜ'
         """
         T_len = observations.shape[0]
         state_dim = smoother_result.smoothed_means.shape[1]
         obs_dim = observations.shape[1]
-        
+
+        Z_is_time_varying = Z is not None and np.asarray(Z).ndim == 3
+        if Z is None:
+            Z = np.eye(obs_dim, state_dim)
+
         # Initialize accumulators
-        S11 = np.zeros((state_dim, state_dim))
+        S11 = np.zeros((state_dim, state_dim))        # sum over ALL t=0..T-1 (for H)
+        S11_trans = np.zeros((state_dim, state_dim))  # sum over t=1..T-1 only (for Q)
+        S_zaz = np.zeros((obs_dim, obs_dim))
+        S_zay = np.zeros((obs_dim, obs_dim))
         S10 = np.zeros((state_dim, state_dim))
         S00 = np.zeros((state_dim, state_dim))
         Sy1 = np.zeros((obs_dim, state_dim))
         Syy = np.zeros((obs_dim, obs_dim))
-        
+
         for t in range(T_len):
             alpha_t = smoother_result.smoothed_means[t]
             P_t = smoother_result.smoothed_covariances[t]
             y_t = observations[t]
-            
+
             # Handle diagonal mode
             if P_t.ndim == 1:
                 P_t_full = np.diag(P_t)
             else:
                 P_t_full = P_t
-                
+
             # E[αₜ αₜ'] = P_{t|T} + α_{t|T} α_{t|T}'
             E_alpha_alpha = P_t_full + np.outer(alpha_t, alpha_t)
             S11 += E_alpha_alpha
-            
+
             # E[yₜ αₜ'] = yₜ α_{t|T}'
             Sy1 += np.outer(y_t, alpha_t)
-            
+
             # Σ yₜ yₜ'
             Syy += np.outer(y_t, y_t)
-            
+
+            # Z_t-aware accumulators for the H update (correct whether Z is
+            # fixed or time-varying -- applying Z_t here, inside the loop,
+            # rather than to pooled S11/Sy1 afterwards).
+            Z_t = Z[t] if Z_is_time_varying else Z
+            S_zaz += Z_t @ E_alpha_alpha @ Z_t.T
+            S_zay += np.outer(Z_t @ alpha_t, y_t)
+
             if t > 0:
+                # This E[αₜ αₜ'] term belongs to a transition (t-1 -> t), so it
+                # contributes to S11_trans (Shumway & Stoffer, 1982, Sec. 3: the
+                # process-noise sum runs over t=2,...,n in 1-indexed terms, i.e.
+                # t=1,...,T_len-1 here -- excluding the first state, which has
+                # no incoming transition and is governed by the initial
+                # distribution, not by Q).
+                S11_trans += E_alpha_alpha
+
                 alpha_tm1 = smoother_result.smoothed_means[t - 1]
                 P_tm1 = smoother_result.smoothed_covariances[t - 1]
                 cross_cov = smoother_result.cross_covariances[t]
-                
+
                 if P_tm1.ndim == 1:
                     P_tm1_full = np.diag(P_tm1)
                 else:
                     P_tm1_full = P_tm1
-                    
+
                 if cross_cov.ndim == 1:
                     cross_cov_full = np.diag(cross_cov)
                 else:
                     cross_cov_full = cross_cov
-                    
+
                 # E[αₜ αₜ₋₁'] = Cov(αₜ, αₜ₋₁|y_{1:T}) + α_{t|T} α_{t-1|T}'
                 E_alpha_alpha_lag = cross_cov_full + np.outer(alpha_t, alpha_tm1)
                 S10 += E_alpha_alpha_lag
-                
+
                 # E[αₜ₋₁ αₜ₋₁']
                 E_alpha_alpha_prev = P_tm1_full + np.outer(alpha_tm1, alpha_tm1)
                 S00 += E_alpha_alpha_prev
-                
+
         return {
             'S11': S11,
+            'S11_trans': S11_trans,
             'S10': S10,
             'S00': S00,
             'Sy1': Sy1,
             'Syy': Syy,
+            'S_zaz': S_zaz,
+            'S_zay': S_zay,
             'T_len': T_len,
         }
         
@@ -318,47 +400,75 @@ class EMEstimator:
         current_Z: NDArray,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray]:
         """M-step: Update parameters to maximize expected log-likelihood.
-        
-        Updates:
+
+        Updates (Shumway & Stoffer, 1982, Sec. 3):
             T = S10 @ S00^{-1}
-            Q = (1/(T-1)) * (S11 - T @ S10')
-            H = (1/T) * (Syy - 2 * Z @ Sy1' + Z @ S11 @ Z')
+            Q = (1/(T_len-1)) * (S11_trans - T @ S10')
+            H = (1/T_len) * (Syy - 2 * Z @ Sy1' + Z @ S11 @ Z')
+
+        ``S11_trans`` (sum over t=1,...,T_len-1, excluding the first state)
+        is used for Q rather than the full ``S11`` (sum over all t including
+        t=0), since Q governs only the T_len-1 actual state transitions; the
+        first state has no incoming transition and is governed by the initial
+        distribution instead. H correctly uses the full S11, since H applies
+        to every observed time point including the first.
+
+        If ``self.dynamic_dim`` (set via __init__) is less than the full
+        state dimension, only that leading sub-block of the state is treated
+        as having transition dynamics; the remaining trailing block is held
+        at identity transition with exactly zero process noise -- i.e. fixed,
+        time-invariant "regression effect" states (Harvey, 1989, Ch. 3.3;
+        Durbin & Koopman, 2012, Sec. 3.2.2), never touched by this update.
         """
         T_len = observations.shape[0]
         state_dim = current_T.shape[0]
-        
-        # Compute sufficient statistics
-        stats = self._compute_sufficient_statistics(observations, smoother_result)
-        
-        # Update T
+        d = self.dynamic_dim if self.dynamic_dim is not None else state_dim
+
+        # Compute sufficient statistics (current_Z passed through so S_zaz/
+        # S_zay are correctly Z_t-aware for both fixed and time-varying Z).
+        stats = self._compute_sufficient_statistics(observations, smoother_result, Z=current_Z)
+
+        # Update T -- restricted to the dynamic d x d sub-block; the static
+        # (state_dim - d) block stays exactly identity (no dynamics).
         if self.estimate_T:
-            S00_reg = stats['S00'] + self.regularization * np.eye(state_dim)
+            S00_dd = stats['S00'][:d, :d] + self.regularization * np.eye(d)
             try:
-                new_T = stats['S10'] @ np.linalg.inv(S00_reg)
+                T_dd = stats['S10'][:d, :d] @ np.linalg.inv(S00_dd)
             except np.linalg.LinAlgError:
-                new_T = stats['S10'] @ np.linalg.pinv(S00_reg)
+                T_dd = stats['S10'][:d, :d] @ np.linalg.pinv(S00_dd)
+            T_dd = self._stabilize_transition(T_dd)
+            new_T = np.eye(state_dim)
+            new_T[:d, :d] = T_dd
         else:
             new_T = current_T
-            
-        # Update Q
+
+        # Update Q -- restricted to the dynamic sub-block; static block's Q
+        # stays exactly zero (no process noise, by construction).
         if self.estimate_Q:
-            new_Q = (stats['S11'] - new_T @ stats['S10'].T) / (T_len - 1)
+            S11_trans_dd = stats['S11_trans'][:d, :d]
+            S10_dd = stats['S10'][:d, :d]
+            Q_dd = (S11_trans_dd - new_T[:d, :d] @ S10_dd.T) / (T_len - 1)
             # Ensure positive definiteness
-            new_Q = 0.5 * (new_Q + new_Q.T)  # Symmetrize
-            eigvals, eigvecs = np.linalg.eigh(new_Q)
+            Q_dd = 0.5 * (Q_dd + Q_dd.T)  # Symmetrize
+            eigvals, eigvecs = np.linalg.eigh(Q_dd)
             eigvals = np.maximum(eigvals, self.regularization)
-            new_Q = eigvecs @ np.diag(eigvals) @ eigvecs.T
-            
+            Q_dd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
             if self.diagonal_Q:
-                new_Q = np.diag(np.diag(new_Q))
+                Q_dd = np.diag(np.diag(Q_dd))
+
+            new_Q = np.zeros((state_dim, state_dim))
+            new_Q[:d, :d] = Q_dd
         else:
             new_Q = current_Q
             
-        # Update H
+        # Update H. Uses S_zaz/S_zay (Z_t applied inside the per-timestep
+        # loop in _compute_sufficient_statistics) rather than applying a
+        # single Z to pooled S11/Sy1 -- required for correctness when Z
+        # varies with t, and identical to the old fixed-Z formula otherwise
+        # (Z @ Sy1' == Σ_t outer(Z @ alpha_t, y_t) == S_zay when Z is fixed).
         if self.estimate_H:
-            Z_S11_Z = current_Z @ stats['S11'] @ current_Z.T
-            Z_Sy1 = current_Z @ stats['Sy1'].T
-            new_H = (stats['Syy'] - 2 * Z_Sy1 + Z_S11_Z) / T_len
+            new_H = (stats['Syy'] - 2 * stats['S_zay'] + stats['S_zaz']) / T_len
             # Ensure positive definiteness
             new_H = 0.5 * (new_H + new_H.T)
             eigvals, eigvecs = np.linalg.eigh(new_H)
@@ -435,10 +545,11 @@ class EMEstimator:
         T_init: Optional[NDArray] = None,
         Q_init: Optional[NDArray] = None,
         H_init: Optional[NDArray] = None,
+        Z: Optional[NDArray] = None,
         scalability_mode: Literal["auto", "dense", "diagonal", "block"] = "auto",
     ) -> EMResult:
         """Fit state space model parameters using EM algorithm.
-        
+
         Parameters
         ----------
         observations : NDArray
@@ -453,9 +564,16 @@ class EMEstimator:
             Initial process noise covariance
         H_init : NDArray, optional
             Initial observation noise covariance
+        Z : NDArray, optional
+            Observation matrix. Fixed, shape (obs_dim, state_dim), or
+            time-varying, shape (T_len, obs_dim, state_dim) -- e.g. for
+            models with known, time-varying regression loadings (Durbin &
+            Koopman, 2012, Sec. 3.1). Defaults to identity(obs_dim, state_dim)
+            if not supplied, matching prior behaviour exactly. Time-varying Z
+            requires scalability_mode='dense' (enforced by KalmanFilter).
         scalability_mode : str
             Mode for Kalman filter computation
-            
+
         Returns
         -------
         EMResult
@@ -465,14 +583,15 @@ class EMEstimator:
         T_len, obs_dim_data = observations.shape
         obs_dim = obs_dim or obs_dim_data
         state_dim = state_dim or obs_dim
-        
+
         logger.info(f"Starting EM with T={T_len}, state_dim={state_dim}, obs_dim={obs_dim}")
-        
+
         # Initialize parameters
-        T, Z, Q, H, initial_mean, initial_cov = self._initialize_parameters(
+        T, Z_default, Q, H, initial_mean, initial_cov = self._initialize_parameters(
             observations, state_dim, obs_dim, T_init, Q_init, H_init
         )
-        
+        Z = Z_default if Z is None else np.asarray(Z, dtype=float)
+
         # Create Kalman filter
         kf = KalmanFilter(
             state_dim=state_dim,

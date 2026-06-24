@@ -161,6 +161,7 @@ class HybridGAMSSM:
         regularization: float = 1e-6,
         confidence_level: float = 0.95,
         random_state: Optional[int] = None,
+        max_eigenvalue: float = 0.98,
     ):
         self.n_splines = n_splines
         self.gam_lam = gam_lam
@@ -170,6 +171,10 @@ class HybridGAMSSM:
         self.scalability_mode = scalability_mode
         self.regularization = regularization
         self.confidence_level = confidence_level
+        # Maximum spectral radius for the SSM's dynamic-block transition
+        # matrix (Hamilton, 1994, Ch. 1). Lower values more aggressively
+        # suppress within-sample drift over the study window.
+        self.max_eigenvalue = max_eigenvalue
         self.random_state = random_state
         
         # Components
@@ -186,8 +191,7 @@ class HybridGAMSSM:
         self._X_train: Optional[NDArray] = None
         self._y_train: Optional[NDArray] = None
         self._y_matrix: Optional[NDArray] = None  # Reshaped as (T, n_locations)
-        self._residual_matrix: Optional[NDArray] = None  # GAM residuals reshaped
-        self._residual_offset: float = 0.0               # mean offset removed before SVD
+        self._residual_matrix: Optional[NDArray] = None  # calibrated satellite field reshaped
         self._location_index_train: Optional[NDArray] = None
         self._time_index_train: Optional[NDArray] = None
 
@@ -208,6 +212,12 @@ class HybridGAMSSM:
         # to k SVD factors and cannot represent road-network-scale spatial detail.
         self._traffic_field: Optional[NDArray] = None
         self._traffic_calibration = None
+
+        # True GAM coefficient (beta_init from pooled OLS + jointly-estimated
+        # beta_delta), used by predict() to scale the GAM baseline consistently
+        # with what the SSM's own observation equation estimates -- see
+        # fit_from_dataset. None until fitted.
+        self.beta_total_: Optional[float] = None
 
         self.is_fitted_ = False
         
@@ -324,6 +334,7 @@ class HybridGAMSSM:
             scalability_mode=self.scalability_mode,
             regularization=self.regularization,
             random_state=self.random_state,
+            max_eigenvalue=self.max_eigenvalue,
         )
         self.ssm_.fit(obs_projected)
 
@@ -434,7 +445,12 @@ class HybridGAMSSM:
             met_map = temporal.met_forcing.set_index("date")["met_forcing"].to_dict()
             met_mean = np.array([met_map.get(d, 0.0) for d in dates])  # (T,)
 
-        forcing_matrix = np.column_stack([activity_vec, met_mean])  # (T, 2)
+        # Leading all-ones column gives a jointly-estimated intercept (its B_tilde
+        # column absorbs any systematic scale gap between the calibrated
+        # satellite field and the GAM baseline -- e.g. the ~3.5 ug/m3 GAM-vs-EPA
+        # bias -- via the same augmented EM as traffic/wind, rather than a
+        # separately pre-computed mean offset).
+        forcing_matrix = np.column_stack([np.ones(T), activity_vec, met_mean])  # (T, 3)
 
         # Store sigma2_obs: represents satellite-to-surface measurement uncertainty.
         # Included in prediction intervals so they reflect uncertainty at point
@@ -484,48 +500,59 @@ class HybridGAMSSM:
         dense = dense.dropna(subset=["t_idx"])
         dense["t_idx"] = dense["t_idx"].astype(int)
 
-        # Subtract GAM prior to get residuals
-        dense["residual"] = dense["obs_dense"].values - lur_prior_arr[dense["loc_idx"].values]
-
-        # Centre residuals: remove the mean offset so the SSM models temporal
-        # deviations around zero rather than absorbing a systematic scale offset
-        # between the calibrated satellite and the GAM prior.
-        residual_mean = dense["residual"].mean()
-        dense["residual"] -= residual_mean
-        self._residual_offset = float(residual_mean)
+        # Initial GAM coefficient via simple pooled OLS (y ~ beta_init * GAM),
+        # used ONLY to choose a sensible matrix for the loadings SVD below --
+        # NOT assumed fixed. Using raw y (implicit beta=0) or y-GAM (implicit
+        # beta=1, the original bug) both make the loadings step internally
+        # inconsistent with whatever beta the regression step later estimates;
+        # this two-step estimator (Doz, Giannone & Reichlin, 2011) calls for
+        # a *sensible* initial matrix, not an arbitrary extreme.
+        # Fit WITH an intercept: forcing the line through the origin would
+        # badly bias the slope given the calibration step's own intercept
+        # (~6 in this dataset) -- y is not expected to be ~0 when GAM is ~0.
+        gam_at_obs = lur_prior_arr[dense["loc_idx"].values]
+        design = np.column_stack([np.ones(len(gam_at_obs)), gam_at_obs])
+        ols_coeffs, _, _, _ = np.linalg.lstsq(design, dense["obs_dense"].values, rcond=None)
+        beta0_init, beta_init = float(ols_coeffs[0]), float(ols_coeffs[1])
         logger.info(
-            "Residual mean offset removed: %.4f µg/m³ (satellite-GAM scale gap)",
-            residual_mean,
+            "Initial GAM relationship (pooled OLS with intercept, for SVD basis only): "
+            "y = %.4f + %.4f * GAM", beta0_init, beta_init,
         )
 
-        # Fill into (T, n_locations) matrix
-        residual_matrix = np.full((T, self.n_locations_), np.nan)
-        residual_matrix[dense["t_idx"].values, dense["loc_idx"].values] = dense["residual"].values
-        self._residual_matrix = residual_matrix
+        dense["residual"] = dense["obs_dense"].values - beta_init * gam_at_obs
+        y_matrix = np.full((T, self.n_locations_), np.nan)
+        y_matrix[dense["t_idx"].values, dense["loc_idx"].values] = dense["residual"].values
+        self._residual_matrix = y_matrix
 
-        # ── Project residuals to low-dimensional temporal factors ───────────
-        # SVD of the (T, n_locations) residual matrix.
-        # NaN cells (missing satellite obs) are filled with 0 before decomposition.
-        # The top `state_dim` factors capture the dominant city-wide temporal modes.
+        # ── Project the deviation-from-(beta_init*GAM) field to low-dimensional
+        # spatial loadings ── NaN cells (missing satellite obs) filled with 0
+        # before decomposition.
         state_dim = self.state_dim
-        residual_filled = np.where(np.isnan(residual_matrix), 0.0, residual_matrix)
-        U, s, Vt = np.linalg.svd(residual_filled, full_matrices=False)
+        y_filled = np.where(np.isnan(y_matrix), 0.0, y_matrix)
+        U, s, Vt = np.linalg.svd(y_filled, full_matrices=False)
         k = min(state_dim, len(s))
-        obs_projected = U[:, :k] * s[:k]       # (T, k) — temporal scores
-        self.Z_spatial_ = Vt[:k, :].T          # (n_locations, k) — spatial loadings
+        scores = U[:, :k] * s[:k]            # (T, k) — temporal scores of the deviation field
+        self.Z_spatial_ = Vt[:k, :].T        # (n_locations, k) — spatial loadings (Lambda)
         var_explained = 100 * (s[:k] ** 2).sum() / (s ** 2).sum()
         logger.info(
-            "Residual SVD: top %d factors explain %.1f%% of variance → SSM obs_dim=%d",
+            "Deviation-field SVD: top %d factors explain %.1f%% of variance → SSM obs_dim=%d",
             k, var_explained, k,
         )
 
-        # Per-location variance of the residuals NOT captured by the top k SVD
-        # factors.  These are included in prediction intervals so that spatial
+        # Project the GAM baseline into score-space: g_tilde = Lambda' @ GAM_prior.
+        # Lambda's columns are orthonormal (right singular vectors of an SVD),
+        # so this is also Lambda's pseudo-inverse projection. The EM jointly
+        # estimates beta_delta (the residual GAM coefficient beyond beta_init)
+        # alongside the forcing effects and dynamics, below; the true GAM
+        # coefficient is beta_init + beta_delta (see self.beta_total_).
+        g_tilde = self.Z_spatial_.T @ lur_prior_arr  # (k,)
+
+        # Per-location variance of the field NOT captured by the top k SVD
+        # factors. These are included in prediction intervals so that spatial
         # patterns outside the low-dimensional subspace contribute to uncertainty.
-        residual_reconstructed = (U[:, :k] * s[:k]) @ Vt[:k, :]   # (T, n_locations)
-        truncation_error = residual_filled - residual_reconstructed  # (T, n_locations)
-        # Use the original NaN mask so missing cells don't inflate the variance
-        valid_mask = ~np.isnan(residual_matrix)
+        y_reconstructed = (U[:, :k] * s[:k]) @ Vt[:k, :]   # (T, n_locations)
+        truncation_error = y_filled - y_reconstructed       # (T, n_locations)
+        valid_mask = ~np.isnan(y_matrix)
         self._truncation_var_ = np.where(
             valid_mask.sum(axis=0) > 1,
             np.nanvar(np.where(valid_mask, truncation_error, np.nan), axis=0),
@@ -536,7 +563,7 @@ class HybridGAMSSM:
             self._truncation_var_.mean(), np.median(self._truncation_var_),
         )
 
-        logger.info("Fitting SSM on satellite-derived residuals with forcing")
+        logger.info("Fitting SSM with jointly-estimated GAM coefficient and forcing effects")
         self.ssm_ = StateSpaceModel(
             state_dim=k,
             em_max_iter=self.em_max_iter,
@@ -544,8 +571,19 @@ class HybridGAMSSM:
             scalability_mode=self.scalability_mode,
             regularization=self.regularization,
             random_state=self.random_state,
+            max_eigenvalue=self.max_eigenvalue,
         )
-        self.ssm_.fit(obs_projected, forcing_matrix=forcing_matrix)
+        self.ssm_.fit(scores, forcing_matrix=forcing_matrix, g_tilde=g_tilde)
+
+        # True GAM coefficient = the initial pooled-OLS estimate (used only
+        # to choose the SVD basis above) plus the jointly-estimated residual
+        # correction. This is what predict() uses, not beta_init or 1.0 alone.
+        self.beta_total_ = beta_init + self.ssm_.beta_
+        logger.info(
+            "GAM coefficient: beta_init=%.4f + beta_delta=%.4f = beta_total=%.4f "
+            "(old buggy design assumed 1.0)",
+            beta_init, self.ssm_.beta_, self.beta_total_,
+        )
 
         self.is_fitted_ = True
         logger.info("HybridGAMSSM fitted via fit_from_dataset()")
@@ -650,7 +688,10 @@ class HybridGAMSSM:
             spatial_matrix  = gam_pred.reshape(self.n_times_, self.n_locations_)
             gam_std_tiled   = gam_std.reshape(self.n_times_, self.n_locations_)
         
-        # Temporal predictions from SSM → expand to all locations via Z_spatial_
+        # Temporal predictions from SSM → expand to all locations via Z_spatial_.
+        # ssm_.predict() returns only the dynamic (alpha) sub-block -- beta and
+        # B_tilde are separate, jointly-estimated fixed-effect states (see
+        # add_traffic_correction / fit_from_dataset), not folded into alpha_t.
         ssm_pred = self.ssm_.predict(confidence_level=self.confidence_level)
         # ssm_pred.mean: (T, k),  Z_spatial_: (n_locations, k)
         temporal_matrix = ssm_pred.mean @ self.Z_spatial_.T          # (T, n_locations)
@@ -658,10 +699,29 @@ class HybridGAMSSM:
             (ssm_pred.std ** 2) @ (self.Z_spatial_ ** 2).T           # (T, n_locations)
         )
 
-        # Total prediction = spatial + temporal + mean residual offset
-        # _residual_offset is the mean of (calibrated_obs - GAM_prior) removed
-        # before SVD/SSM fitting; adding it back here restores the correct scale.
-        total = spatial_matrix + temporal_matrix + self._residual_offset
+        # Forcing contribution (traffic anomaly, wind): B_tilde @ u_t in score
+        # space, mapped to all locations via the same spatial loadings Lambda.
+        # beta*GAM is intentionally NOT added here -- it was only used
+        # internally (via g_tilde) to correctly separate genuine satellite
+        # dynamics from the GAM-correlated part of the signal; the GAM's own
+        # contribution to the surface prediction is spatial_matrix above, at
+        # its native annual-mean scale, not beta-scaled.
+        if self.ssm_.B_ is not None and self.ssm_._forcing_matrix is not None:
+            forcing_scores = self.ssm_._forcing_matrix @ self.ssm_.B_.T   # (T, k)
+            forcing_matrix_term = forcing_scores @ self.Z_spatial_.T      # (T, n_locations)
+        else:
+            forcing_matrix_term = 0.0
+
+        # Total prediction = beta_total * GAM baseline + temporal deviation
+        # (satellite-driven dynamics + forcing). beta_total (see
+        # fit_from_dataset) is the model's own jointly-estimated relationship
+        # between calibrated satellite/EPA-scale observations and the GAM --
+        # using 1.0 here (as the original buggy design implicitly did) would
+        # be internally inconsistent with what the SSM's observation equation
+        # actually estimates. spatial_matrix itself (returned unscaled, below)
+        # still represents the GAM's own native annual-mean prediction.
+        beta_total = self.beta_total_ if self.beta_total_ is not None else 1.0
+        total = beta_total * spatial_matrix + temporal_matrix + forcing_matrix_term
 
         # Optional spatially-resolved traffic correction (see add_traffic_correction).
         # Added independently of the satellite-driven SSM term so it can carry
@@ -808,8 +868,11 @@ class HybridGAMSSM:
         temporal_matrix = ssm_forecast.mean @ self.Z_spatial_.T
         temporal_std = np.sqrt((ssm_forecast.std ** 2) @ (self.Z_spatial_ ** 2).T)
 
-        # Combine (apply same residual offset as in predict())
-        total = spatial_matrix + temporal_matrix + self._residual_offset
+        # Combine. No forcing term here: ssm_.forecast() extrapolates only the
+        # dynamic (alpha) sub-block, since future traffic/wind values are not
+        # available to this method's signature; beta*GAM is likewise not
+        # added, for the same reason as in predict() above.
+        total = spatial_matrix + temporal_matrix
         combined_std = np.sqrt(gam_std_matrix ** 2 + temporal_std ** 2)
         
         from scipy import stats
@@ -1165,8 +1228,8 @@ class HybridGAMSSM:
             'confidence_level': self.confidence_level,
             'n_locations': self.n_locations_,
             'n_times': self.n_times_,
-            'residual_offset': self._residual_offset,
             'sigma2_obs': self._sigma2_obs,
+            'beta_total': self.beta_total_,
         }
         with open(directory / "metadata.json", 'w') as f:
             json.dump(metadata, f, indent=2)
@@ -1254,8 +1317,9 @@ class HybridGAMSSM:
         
         model.n_locations_ = metadata['n_locations']
         model.n_times_ = metadata['n_times']
-        model._residual_offset = float(metadata.get('residual_offset', 0.0))
         model._sigma2_obs = float(metadata.get('sigma2_obs', 0.0))
+        beta_total = metadata.get('beta_total', None)
+        model.beta_total_ = float(beta_total) if beta_total is not None else None
         trunc = data.get('truncation_var', np.array([]))
         model._truncation_var_ = trunc if trunc.size else None
         model.is_fitted_ = True
