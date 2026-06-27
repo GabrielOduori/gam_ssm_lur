@@ -35,16 +35,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
-import numpy as np
-from numpy.typing import NDArray
-import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.gridspec import GridSpec
-from matplotlib.lines import Line2D
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.patches import Patch
+from numpy.typing import NDArray
 from scipy.stats import linregress
 
 logger = logging.getLogger(__name__)
@@ -53,32 +51,34 @@ logger = logging.getLogger(__name__)
 # Global style
 # ---------------------------------------------------------------------------
 
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "font.sans-serif": ["Arial", "DejaVu Sans"],
-    "font.size": 10,
-    "axes.labelsize": 11,
-    "axes.titlesize": 12,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9,
-    "figure.titlesize": 13,
-    "figure.dpi": 150,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.grid": False,
-})
+plt.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "DejaVu Sans"],
+        "font.size": 10,
+        "axes.labelsize": 11,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 9,
+        "figure.titlesize": 13,
+        "figure.dpi": 150,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.grid": False,
+    }
+)
 
 # Colour constants
-CMAP_RESIDUAL = "RdBu_r"    # residual / diverging maps
-CMAP_ERROR    = "YlOrRd"    # absolute error maps
+CMAP_RESIDUAL = "RdBu_r"  # residual / diverging maps
+CMAP_ERROR = "YlOrRd"  # absolute error maps
 
 # NO2 concentration maps — fixed breakpoints matching Atmos-Street 2023
 # Dublin range: ~5–25 µg/m³ (Atmos-Street 2023 full range 2–57 µg/m³)
 # Colours: light yellow → amber → orange → red → dark red (EEA-style)
-NO2_BOUNDS = [0, 5, 8, 10, 12, 15, 18, 22, 28, 40]   # µg/m³ class edges
+NO2_BOUNDS = [0, 5, 8, 10, 12, 15, 18, 22, 28, 40]  # µg/m³ class edges
 NO2_COLOURS = [
     "#ffffcc",  # 0–5    very low
     "#c7e9b4",  # 5–8    low
@@ -91,6 +91,7 @@ NO2_COLOURS = [
     "#4d004b",  # 28–40+
 ]
 
+
 def _resolve_provider(source: str):
     """Resolve a dot-notation provider string to a contextily provider dict.
 
@@ -100,6 +101,7 @@ def _resolve_provider(source: str):
     ``"OpenStreetMap.Mapnik"``  →  ``ctx.providers.OpenStreetMap.Mapnik``
     """
     import contextily as ctx
+
     obj = ctx.providers
     for part in source.split("."):
         obj = obj[part]
@@ -108,23 +110,32 @@ def _resolve_provider(source: str):
 
 def _no2_cmap_norm():
     """Return (ListedColormap, BoundaryNorm) for the fixed NO2 colour scheme."""
-    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+
     cmap = ListedColormap(NO2_COLOURS, name="no2_atmos")
     norm = BoundaryNorm(NO2_BOUNDS, cmap.N)
     return cmap, norm
 
-CMAP_NO2 = "no2_atmos"   # placeholder name — use _no2_cmap_norm() for actual cmap/norm
-COL_LUR       = "steelblue"  # GAM LUR prior lines / satellite markers
-COL_SSM       = "darkorange" # GAM-SSM lines / uncertainty shading
-COL_OBS       = "black"      # observed station measurements
-ALPHA_MAP     = 0.6
-ALPHA_SHADE   = 0.2
-MISSING_KWD   = {"color": "lightgrey", "alpha": ALPHA_MAP}
+
+CMAP_NO2 = "no2_atmos"  # placeholder name — use _no2_cmap_norm() for actual cmap/norm
+COL_LUR = "steelblue"  # GAM LUR prior lines / satellite markers
+COL_SSM = "darkorange"  # GAM-SSM lines / uncertainty shading
+COL_OBS = "black"  # observed station measurements
+ALPHA_MAP = 0.5
+ALPHA_SHADE = 0.2
+MISSING_KWD = {"color": "lightgrey", "alpha": ALPHA_MAP}
 
 # Per-station colours for LOOCV scatter
 _STATION_PALETTE = [
-    "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3",
-    "#937860", "#DA8BC3", "#8C8C8C", "#CCB974",
+    "#4C72B0",
+    "#DD8452",
+    "#55A868",
+    "#C44E52",
+    "#8172B3",
+    "#937860",
+    "#DA8BC3",
+    "#8C8C8C",
+    "#CCB974",
 ]
 
 
@@ -136,31 +147,37 @@ def _fix_colorbar_heights(fig: plt.Figure) -> None:
     paired with its nearest map panel by 2D centre distance so the function
     works correctly for both single-panel and multi-panel figures.
     """
-    all_axes  = fig.axes
+    all_axes = fig.axes
     # Colorbars are much taller than wide; maps are roughly square or wider
-    cbar_axes = [a for a in all_axes
-                 if a.get_position().width < a.get_position().height * 0.3]
-    map_axes  = [a for a in all_axes
-                 if a.get_position().width >= a.get_position().height * 0.3]
+    cbar_axes = [
+        a for a in all_axes if a.get_position().width < a.get_position().height * 0.3
+    ]
+    map_axes = [
+        a for a in all_axes if a.get_position().width >= a.get_position().height * 0.3
+    ]
     if not map_axes or not cbar_axes:
         return
     for cbar_ax in cbar_axes:
         cbar_pos = cbar_ax.get_position()
-        cbar_cx  = cbar_pos.x0 + cbar_pos.width  / 2
-        cbar_cy  = cbar_pos.y0 + cbar_pos.height / 2
+        cbar_cx = cbar_pos.x0 + cbar_pos.width / 2
+        cbar_cy = cbar_pos.y0 + cbar_pos.height / 2
         # Nearest map by 2-D centre distance — correct for any grid layout
         best = min(
             map_axes,
             key=lambda a: (
-                (a.get_position().x0 + a.get_position().width  / 2 - cbar_cx) ** 2 +
-                (a.get_position().y0 + a.get_position().height / 2 - cbar_cy) ** 2
+                (a.get_position().x0 + a.get_position().width / 2 - cbar_cx) ** 2
+                + (a.get_position().y0 + a.get_position().height / 2 - cbar_cy) ** 2
             ),
         )
         ref_pos = best.get_position()
-        cbar_ax.set_position([
-            cbar_pos.x0, ref_pos.y0,
-            cbar_pos.width, ref_pos.height,
-        ])
+        cbar_ax.set_position(
+            [
+                cbar_pos.x0,
+                ref_pos.y0,
+                cbar_pos.width,
+                ref_pos.height,
+            ]
+        )
         # Match colorbar fill opacity to the map polygon alpha
         for coll in cbar_ax.collections:
             coll.set_alpha(ALPHA_MAP)
@@ -181,15 +198,20 @@ def _annotate_r2(ax: plt.Axes, y_true: NDArray, y_pred: NDArray) -> None:
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
     ax.annotate(
         f"R² = {r2:.3f}",
-        xy=(0.95, 0.05), xycoords="axes fraction",
-        ha="right", va="bottom", fontsize=10, fontweight="bold",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        xy=(0.95, 0.05),
+        xycoords="axes fraction",
+        ha="right",
+        va="bottom",
+        fontsize=10,
+        fontweight="bold",
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
     )
 
 
 # ---------------------------------------------------------------------------
 # Spatial Visualizer
 # ---------------------------------------------------------------------------
+
 
 class SpatialVisualizer:
     """Maps of spatial pollution distributions.
@@ -252,8 +274,11 @@ class SpatialVisualizer:
             if norm is not None:
                 legend_kwds["extend"] = "max"
             merged.plot(
-                column="_val", ax=ax,
-                cmap=cmap_obj, vmin=vmin, vmax=vmax,
+                column="_val",
+                ax=ax,
+                cmap=cmap_obj,
+                vmin=vmin,
+                vmax=vmax,
                 norm=norm,
                 alpha=ALPHA_MAP,
                 legend=legend,
@@ -265,6 +290,7 @@ class SpatialVisualizer:
             if basemap:
                 try:
                     import contextily as ctx
+
                     provider = (
                         ctx.providers.CartoDB.Positron
                         if basemap_source is None
@@ -283,11 +309,25 @@ class SpatialVisualizer:
             else:
                 logger.warning("No grid geometry available — cannot render map")
                 return
-            sc = ax.scatter(cx, cy, c=values, cmap=cmap_obj, s=3,
-                            alpha=ALPHA_MAP, vmin=vmin, vmax=vmax, norm=norm)
+            sc = ax.scatter(
+                cx,
+                cy,
+                c=values,
+                cmap=cmap_obj,
+                s=3,
+                alpha=ALPHA_MAP,
+                vmin=vmin,
+                vmax=vmax,
+                norm=norm,
+            )
             if legend:
-                plt.colorbar(sc, ax=ax, label=legend_label, shrink=0.85,
-                             extend="max" if norm is not None else "neither")
+                plt.colorbar(
+                    sc,
+                    ax=ax,
+                    label=legend_label,
+                    shrink=0.85,
+                    extend="max" if norm is not None else "neither",
+                )
 
         ax.set_xlabel("Longitude", fontsize=8)
         ax.set_ylabel("Latitude", fontsize=8)
@@ -352,13 +392,21 @@ class SpatialVisualizer:
         if standalone:
             fig, ax = plt.subplots(figsize=(8, 7))
 
-        self._map_ax(ax, values, cmap=cmap, vmin=vmin, vmax=vmax,
-                     legend_label=legend_label,
-                     basemap=basemap, basemap_source=basemap_source)
+        self._map_ax(
+            ax,
+            values,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            legend_label=legend_label,
+            basemap=basemap,
+            basemap_source=basemap_source,
+        )
 
         # Overlay EPA station markers + labels
         if station_df is not None:
             import geopandas as gpd
+
             sta_gdf = gpd.GeoDataFrame(
                 station_df,
                 geometry=gpd.points_from_xy(
@@ -366,14 +414,23 @@ class SpatialVisualizer:
                 ),
                 crs="EPSG:4326",
             ).to_crs(self.grid_gdf.crs)
-            sta_gdf.plot(ax=ax, color="black", markersize=40,
-                         marker="^", zorder=6, label="EPA stations")
+            sta_gdf.plot(
+                ax=ax,
+                color="black",
+                markersize=40,
+                marker="^",
+                zorder=6,
+                label="EPA stations",
+            )
             for _, row in sta_gdf.iterrows():
                 ax.annotate(
                     row[station_label_col],
                     xy=(row.geometry.x, row.geometry.y),
-                    xytext=(4, 4), textcoords="offset points",
-                    fontsize=7, fontweight="bold", color="black",
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="black",
                     zorder=7,
                 )
 
@@ -426,8 +483,15 @@ class SpatialVisualizer:
             axes = [axes]
 
         for ax, (vals, label) in zip(axes, panels):
-            self._map_ax(ax, vals, cmap="turbo", vmin=vmin, vmax=vmax,
-                         legend=True, legend_label="NO₂ (µg/m³)")
+            self._map_ax(
+                ax,
+                vals,
+                cmap="turbo",
+                vmin=vmin,
+                vmax=vmax,
+                legend=True,
+                legend_label="NO₂ (µg/m³)",
+            )
             ax.set_title(label, fontsize=11, fontweight="bold")
 
         if suptitle:
@@ -496,8 +560,15 @@ class SpatialVisualizer:
 
             vals = day.set_index(grid_id_col)[value_col]
             gids = list(vals.index)
-            self._map_ax(ax, vals.values, grid_ids=gids,
-                         cmap="turbo", vmin=vmin, vmax=vmax, basemap=True)
+            self._map_ax(
+                ax,
+                vals.values,
+                grid_ids=gids,
+                cmap="turbo",
+                vmin=vmin,
+                vmax=vmax,
+                basemap=True,
+            )
 
             # Build title
             base = date_labels.get(d, str(d)) if date_labels else str(d)
@@ -549,28 +620,52 @@ class SpatialVisualizer:
         if predictions is not None:
             pred = np.asarray(predictions)
             vmax_pred = float(np.nanpercentile(pred, 98))
-            self._map_ax(axes[col], pred, grid_ids=grid_ids,
-                         cmap="turbo", vmin=0, vmax=vmax_pred,
-                         legend_label="NO₂ (µg/m³)", basemap=True)
-            axes[col].set_title("(a) GAM Spatial Prediction",
-                                fontsize=11, fontweight="bold")
+            self._map_ax(
+                axes[col],
+                pred,
+                grid_ids=grid_ids,
+                cmap="turbo",
+                vmin=0,
+                vmax=vmax_pred,
+                legend_label="NO₂ (µg/m³)",
+                basemap=True,
+            )
+            axes[col].set_title(
+                "(a) GAM Spatial Prediction", fontsize=11, fontweight="bold"
+            )
             col += 1
 
         label_b = "(b)" if predictions is not None else "(a)"
         label_c = "(c)" if predictions is not None else "(b)"
 
-        self._map_ax(axes[col], res, grid_ids=grid_ids,
-                     cmap=CMAP_RESIDUAL, vmin=-lim, vmax=lim,
-                     legend_label="Residual (µg/m³)", basemap=True)
-        axes[col].set_title(f"{label_b} Signed Residuals  (obs − predicted)",
-                            fontsize=11, fontweight="bold")
+        self._map_ax(
+            axes[col],
+            res,
+            grid_ids=grid_ids,
+            cmap=CMAP_RESIDUAL,
+            vmin=-lim,
+            vmax=lim,
+            legend_label="Residual (µg/m³)",
+            basemap=True,
+        )
+        axes[col].set_title(
+            f"{label_b} Signed Residuals  (obs − predicted)",
+            fontsize=11,
+            fontweight="bold",
+        )
         col += 1
 
-        self._map_ax(axes[col], np.abs(res), grid_ids=grid_ids,
-                     cmap=CMAP_ERROR, vmin=0, vmax=lim,
-                     legend_label="|Residual| (µg/m³)", basemap=True)
-        axes[col].set_title(f"{label_c} Absolute Error",
-                            fontsize=11, fontweight="bold")
+        self._map_ax(
+            axes[col],
+            np.abs(res),
+            grid_ids=grid_ids,
+            cmap=CMAP_ERROR,
+            vmin=0,
+            vmax=lim,
+            legend_label="|Residual| (µg/m³)",
+            basemap=True,
+        )
+        axes[col].set_title(f"{label_c} Absolute Error", fontsize=11, fontweight="bold")
 
         if title:
             fig.suptitle(title, fontsize=12, fontweight="bold")
@@ -610,20 +705,22 @@ class SpatialVisualizer:
         n_plot = min(n_top, n_features)
         nrows = (n_plot + ncols - 1) // ncols
 
-        fig, axes = plt.subplots(nrows, ncols,
-                                 figsize=(5 * ncols, 3.5 * nrows),
-                                 constrained_layout=True)
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(5 * ncols, 3.5 * nrows), constrained_layout=True
+        )
         axes = np.atleast_1d(axes).flatten()
 
         for i in range(n_plot):
             ax = axes[i]
             pd_result = gam_model.partial_dependence(i)
-            ax.plot(pd_result.grid, pd_result.response,
-                    color=COL_LUR, lw=2)
-            ax.fill_between(pd_result.grid,
-                            pd_result.confidence_lower,
-                            pd_result.confidence_upper,
-                            alpha=ALPHA_SHADE, color=COL_LUR)
+            ax.plot(pd_result.grid, pd_result.response, color=COL_LUR, lw=2)
+            ax.fill_between(
+                pd_result.grid,
+                pd_result.confidence_lower,
+                pd_result.confidence_upper,
+                alpha=ALPHA_SHADE,
+                color=COL_LUR,
+            )
             ax.axhline(0, color="grey", lw=0.8, ls="--")
             ax.set_title(pd_result.feature_name, fontsize=8, fontweight="bold")
             ax.set_xlabel("Feature value", fontsize=7)
@@ -653,7 +750,7 @@ class SpatialVisualizer:
             descending (as returned by ``SpatialGAM.get_feature_importance``).
         """
         top = importances.head(n_top).copy()
-        top = top.sort_values("importance")   # ascending for horizontal bar
+        top = top.sort_values("importance")  # ascending for horizontal bar
 
         fig, ax = plt.subplots(figsize=(8, 0.35 * n_top + 1.5))
         ax.barh(top["feature"], top["importance"], color=COL_LUR, alpha=0.8)
@@ -704,57 +801,87 @@ class SpatialVisualizer:
         -------
         matplotlib.figure.Figure
         """
-        try:
-            import shap
-            logging.getLogger("shap").setLevel(logging.WARNING)
-        except ImportError:
-            logger.warning("shap not installed — skipping SHAP plot")
-            return None
-
         feat_cols = list(gam_model.feature_names_)
         X = X_df[feat_cols].values.astype(float)
 
         rng = np.random.default_rng(42)
-        bg_idx  = rng.choice(len(X), size=min(n_background, len(X)), replace=False)
-        exp_idx = rng.choice(len(X), size=min(n_explain,    len(X)), replace=False)
+        bg_idx = rng.choice(len(X), size=min(n_background, len(X)), replace=False)
+        exp_idx = rng.choice(len(X), size=min(n_explain, len(X)), replace=False)
 
-        X_bg  = X[bg_idx]
+        X_bg = X[bg_idx]
         X_exp = X[exp_idx]
 
-        explainer   = shap.KernelExplainer(gam_model.predict, X_bg)
-        shap_values = explainer.shap_values(X_exp, silent=True)   # (n_exp, n_feat)
+        # SpatialGAM is a strictly additive model (sum of independent
+        # per-feature smooth terms), so its exact Shapley value for feature i
+        # has a closed form requiring no sampling at all:
+        #   SHAP_i(x) = f_i(x_i) - E_background[f_i(X_i)]
+        # (the per-term deviation from its own baseline expectation -- see
+        # Lundberg & Lee, 2017, Sec. 3 "additive feature attribution methods").
+        # This replaces shap.KernelExplainer, which solved this exactly-known
+        # decomposition via expensive coalition sampling (~25 min for n_feat=31,
+        # n_explain=500 on this dataset; this closed-form version is ~instant).
+        try:
+            shap_values = np.column_stack(
+                [
+                    gam_model.gam_.partial_dependence(term=i, X=X_exp, width=0.95)[0]
+                    - gam_model.gam_.partial_dependence(term=i, X=X_bg, width=0.95)[
+                        0
+                    ].mean()
+                    for i in range(len(feat_cols))
+                ]
+            )
+        except Exception:
+            logger.warning(
+                "Exact additive SHAP computation failed; falling back to "
+                "shap.KernelExplainer (much slower)."
+            )
+            try:
+                import shap
 
-        shap_df   = pd.DataFrame(shap_values, columns=feat_cols)
-        mean_abs  = shap_df.abs().mean().sort_values(ascending=False)
+                logging.getLogger("shap").setLevel(logging.WARNING)
+            except ImportError:
+                logger.warning("shap not installed — skipping SHAP plot")
+                return None
+            explainer = shap.KernelExplainer(gam_model.predict, X_bg)
+            shap_values = explainer.shap_values(X_exp, silent=True)  # (n_exp, n_feat)
+
+        shap_df = pd.DataFrame(shap_values, columns=feat_cols)
+        mean_abs = shap_df.abs().mean().sort_values(ascending=False)
         top_feats = mean_abs.head(n_top).index.tolist()
 
         shap_top = shap_df[top_feats].values
-        X_top    = pd.DataFrame(X_exp, columns=feat_cols)[top_feats].values
+        X_top = pd.DataFrame(X_exp, columns=feat_cols)[top_feats].values
 
-        # Human-readable feature labels
+        # Readable feature labels
         _SECTOR_NAMES = {
-            "_s0": " (N)", "_s1": " (NE)", "_s2": " (E)", "_s3": " (SE)",
-            "_s4": " (S)", "_s5": " (SW)", "_s6": " (W)", "_s7": " (NW)",
+            "_s0": " (N)",
+            "_s1": " (NE)",
+            "_s2": " (E)",
+            "_s3": " (SE)",
+            "_s4": " (S)",
+            "_s5": " (SW)",
+            "_s6": " (W)",
+            "_s7": " (NW)",
         }
         _REPLACEMENTS = [
-            ("road_length_",           "Road length "),
-            ("_total",                 " – all sectors"),
-            ("scats_intensity",        "Traffic intensity"),
+            ("road_length_", "Road length "),
+            ("_total", " – all sectors"),
+            ("scats_intensity", "Traffic intensity"),
             ("scats_inverse_distance", "Traffic proximity"),
             ("scats_inverse_distance_sq", "Traffic proximity²"),
             ("nearest_scats_distance", "Nearest traffic sensor"),
-            ("distance_to_scats",      "Distance to traffic sensor"),
-            ("distance_to_motorway",   "Distance to motorway"),
+            ("distance_to_scats", "Distance to traffic sensor"),
+            ("distance_to_motorway", "Distance to motorway"),
             ("motorway_inverse_distance", "Motorway proximity"),
             ("distance_to_industrial", "Distance to industrial"),
             ("traffic_signals_inverse_distance_sq", "Traffic signal proximity²"),
-            ("traffic_signals_inverse_distance",    "Traffic signal proximity"),
+            ("traffic_signals_inverse_distance", "Traffic signal proximity"),
             ("landuse_commercial_area_", "Commercial area "),
             ("landuse_industrial_area_", "Industrial area "),
             ("building_commercial_area_", "Commercial buildings "),
             ("population_density_km2", "Population density"),
-            ("elevation_m",            "Elevation"),
-            ("m_s",                    "m "),
+            ("elevation_m", "Elevation"),
+            ("m_s", "m "),
         ]
 
         def _fmt(name: str) -> str:
@@ -770,25 +897,28 @@ class SpatialVisualizer:
         labels = [_fmt(f) for f in top_feats]
 
         fig, ax = plt.subplots(figsize=(9, 0.45 * n_top + 2), constrained_layout=True)
-        cmap_shap   = plt.cm.RdBu_r
+        cmap_shap = plt.cm.RdBu_r
         y_positions = np.arange(n_top)
 
         for i in range(n_top):
-            sv   = shap_top[:, i]
-            fv   = X_top[:, i]
-            norm = plt.Normalize(vmin=np.percentile(fv, 5),
-                                 vmax=np.percentile(fv, 95))
+            sv = shap_top[:, i]
+            fv = X_top[:, i]
+            norm = plt.Normalize(vmin=np.percentile(fv, 5), vmax=np.percentile(fv, 95))
             colours = cmap_shap(norm(fv))
-            jitter  = rng.uniform(-0.3, 0.3, size=len(sv))
-            ax.scatter(sv, y_positions[i] + jitter,
-                       c=colours, s=6, alpha=0.6, linewidths=0)
+            jitter = rng.uniform(-0.3, 0.3, size=len(sv))
+            ax.scatter(
+                sv, y_positions[i] + jitter, c=colours, s=6, alpha=0.6, linewidths=0
+            )
 
         ax.axvline(0, color="grey", lw=0.8, ls="--")
         ax.set_yticks(y_positions)
         ax.set_yticklabels(labels, fontsize=8)
         ax.set_xlabel("SHAP value — contribution to predicted NO₂ (µg/m³)", fontsize=9)
-        ax.set_title("SHAP Feature Importance — GAM Spatial Component",
-                     fontsize=10, fontweight="bold")
+        ax.set_title(
+            "SHAP Feature Importance — GAM Spatial Component",
+            fontsize=10,
+            fontweight="bold",
+        )
 
         sm = plt.cm.ScalarMappable(cmap=cmap_shap, norm=plt.Normalize(vmin=0, vmax=1))
         sm.set_array([])
@@ -865,7 +995,11 @@ class SpatialVisualizer:
 
         # Pre-compute column means for all sector columns (used as neutral value)
         all_sector_feat = [c for s in sector_cols.values() for c in s]
-        col_means = X_base[all_sector_feat].mean() if all_sector_feat else pd.Series(dtype=float)
+        col_means = (
+            X_base[all_sector_feat].mean()
+            if all_sector_feat
+            else pd.Series(dtype=float)
+        )
 
         # Predict a surface per sector
         sector_preds: List[NDArray] = []
@@ -886,7 +1020,8 @@ class SpatialVisualizer:
 
         nrows = (n_sectors + ncols - 1) // ncols
         fig, axes = plt.subplots(
-            nrows, ncols,
+            nrows,
+            ncols,
             figsize=(3 * ncols, 3 * nrows),  # 12×6 for 2×4 — fits on one page
             constrained_layout=True,
         )
@@ -895,14 +1030,18 @@ class SpatialVisualizer:
         for s in range(n_sectors):
             ax = axes[s]
             self._map_ax(
-                ax, sector_preds[s],
-                cmap="turbo", vmin=vmin, vmax=vmax,
+                ax,
+                sector_preds[s],
+                cmap="turbo",
+                vmin=vmin,
+                vmax=vmax,
                 legend=(s == n_sectors - 1),  # colorbar on last panel only
                 basemap=True,
             )
             ax.set_title(
                 f"Dominant wind: {sector_names[s]}",
-                fontsize=9, fontweight="bold",
+                fontsize=9,
+                fontweight="bold",
             )
 
         for ax in axes[n_sectors:]:
@@ -910,11 +1049,11 @@ class SpatialVisualizer:
 
         fig.suptitle(
             "GAM Spatial NO₂ Prediction by Dominant Wind Sector",
-            fontsize=12, fontweight="bold",
+            fontsize=12,
+            fontweight="bold",
         )
         _save(fig, save_path)
         return fig
-
 
     def plot_gam_with_wind_rose(
         self,
@@ -956,17 +1095,19 @@ class SpatialVisualizer:
         sector_labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][:n_sectors]
 
         # Aggregate wind stats across all cells and dates
-        freq_cols  = [f"wind_sector_{s}_freq"       for s in range(n_sectors)]
-        speed_cols = [f"wind_sector_{s}_mean_speed"  for s in range(n_sectors)]
-        freq  = wind_df[freq_cols].mean().values
+        freq_cols = [f"wind_sector_{s}_freq" for s in range(n_sectors)]
+        speed_cols = [f"wind_sector_{s}_mean_speed" for s in range(n_sectors)]
+        freq = wind_df[freq_cols].mean().values
         speed = wind_df[speed_cols].mean().values
 
         # --- Layout: map left, colourbar strip right, wind rose inset top-left ---
         fig = plt.figure(figsize=(11, 8))
-        ax_map  = fig.add_axes([0.05, 0.05, 0.78, 0.88])   # main map
-        ax_cbar = fig.add_axes([0.85, 0.15, 0.03, 0.60])   # NO₂ colourbar (right strip)
-        ax_rose = fig.add_axes([0.06, 0.60, 0.22, 0.28],   # wind rose — top-left
-                               projection="polar")
+        ax_map = fig.add_axes([0.05, 0.05, 0.78, 0.88])  # main map
+        ax_cbar = fig.add_axes([0.85, 0.15, 0.03, 0.60])  # NO₂ colourbar (right strip)
+        ax_rose = fig.add_axes(
+            [0.06, 0.60, 0.22, 0.28],  # wind rose — top-left
+            projection="polar",
+        )
 
         # Draw main map — suppress built-in legend, we place it manually
         self._map_ax(ax_map, gam_values, cmap="turbo", legend=False, basemap=True)
@@ -975,6 +1116,7 @@ class SpatialVisualizer:
         # Manual NO₂ colourbar in right strip
         vmax_no2 = float(np.nanpercentile(gam_values, 98))
         import matplotlib.colors as mcolors
+
         sm_no2 = plt.cm.ScalarMappable(
             cmap="turbo",
             norm=mcolors.Normalize(vmin=0, vmax=vmax_no2),
@@ -987,15 +1129,17 @@ class SpatialVisualizer:
         # --- Wind rose ---
         # Use sector angles directly; set_theta_zero_location + set_theta_direction
         # handle the meteorological convention (N at top, clockwise).
+        # This map isnt so useful in the current context anyways.
         angles = np.linspace(0, 2 * np.pi, n_sectors, endpoint=False)
         bar_width = (2 * np.pi) / n_sectors * 0.85
 
         norm_speed = plt.Normalize(vmin=speed.min(), vmax=speed.max())
-        cmap_rose  = plt.cm.Blues
-        colours    = cmap_rose(norm_speed(speed))
+        cmap_rose = plt.cm.Blues
+        colours = cmap_rose(norm_speed(speed))
 
         ax_rose.bar(
-            angles, freq,
+            angles,
+            freq,
             width=bar_width,
             color=colours,
             alpha=0.9,
@@ -1007,12 +1151,19 @@ class SpatialVisualizer:
         # Direction labels just outside the longest bar
         r_label = freq.max() * 1.3
         for angle, label in zip(angles, sector_labels):
-            ax_rose.text(angle, r_label, label,
-                         ha="center", va="center",
-                         fontsize=7, fontweight="bold", color="k")
+            ax_rose.text(
+                angle,
+                r_label,
+                label,
+                ha="center",
+                va="center",
+                fontsize=7,
+                fontweight="bold",
+                color="k",
+            )
 
         ax_rose.set_theta_zero_location("N")
-        ax_rose.set_theta_direction(-1)   # clockwise
+        ax_rose.set_theta_direction(-1)  # clockwise
         ax_rose.set_yticklabels([])
         ax_rose.set_xticklabels([])
         ax_rose.spines["polar"].set_visible(False)
@@ -1036,14 +1187,22 @@ class SpatialVisualizer:
 # Temporal Visualizer
 # ---------------------------------------------------------------------------
 
+
 class TemporalVisualizer:
     """Time series visualization for SSM output.
 
     Colour convention:
-      - steelblue  : GAM LUR static prior (horizontal dashed line)
-      - black dots : EPA observed values
-      - darkorange : GAM-SSM prediction line + ±1σ shading
+      - blue dots  : EPA observed values
+      - darkorange : GAM-SSM prediction line
+      - steelblue shading : ±1.96 sigma (95%) prediction interval
       - steelblue triangles : days with satellite Kalman update
+
+    Note: the GAM-LUR static prior (a single time-invariant value per
+    station, fit against the annual-mean AtmosPlan target) is deliberately
+    not plotted here. Overlaying an annual baseline on a daily time series
+    compares quantities at mismatched temporal scales and is not a
+    meaningful reference for evaluating temporal performance; the static
+    prior's spatial pattern is shown separately (see static_lur_prior.png).
     """
 
     def plot_station_timeseries(
@@ -1077,15 +1236,16 @@ class TemporalVisualizer:
         n = len(stations)
         nrows = (n + ncols - 1) // ncols
 
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows),
-                                 sharex=False)
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(5 * ncols, 3.5 * nrows), sharex=False
+        )
         axes = np.atleast_1d(axes).flatten()
 
         for ax, sid in zip(axes, stations):
             grp = preds_df[preds_df[station_col] == sid].sort_values(date_col)
             dates = grp[date_col].values
-            obs   = grp[obs_col].values
-            ssm   = grp[ssm_col].values
+            obs = grp[obs_col].values
+            ssm = grp[ssm_col].values
 
             # Observed — dots connected by line
             ax.plot(dates, obs, "b.-", ms=4, lw=1, label="Observed", zorder=4)
@@ -1093,20 +1253,32 @@ class TemporalVisualizer:
             # 95% CI shading (behind the smoothed line)
             if uncertainty_col and uncertainty_col in grp.columns:
                 unc = grp[uncertainty_col].values
-                ax.fill_between(dates, ssm - 1.96 * unc, ssm + 1.96 * unc,
-                                alpha=ALPHA_SHADE, color="steelblue", label="95% CI", zorder=2)
+                ax.fill_between(
+                    dates,
+                    ssm - 1.96 * unc,
+                    ssm + 1.96 * unc,
+                    alpha=ALPHA_SHADE,
+                    color="steelblue",
+                    label="95% CI",
+                    zorder=2,
+                )
 
             # Smoothed prediction line
             ax.plot(dates, ssm, color=COL_SSM, lw=1.5, label="Smoothed", zorder=3)
 
             # Satellite update markers
             if satellite_col and satellite_col in grp.columns:
-                sat_rows = grp[grp[satellite_col] == True]
+                sat_rows = grp[grp[satellite_col]]
                 if len(sat_rows):
-                    ax.scatter(sat_rows[date_col].values,
-                               sat_rows[ssm_col].values,
-                               marker="^", s=20, color=COL_LUR, zorder=5,
-                               label="SAT update")
+                    ax.scatter(
+                        sat_rows[date_col].values,
+                        sat_rows[ssm_col].values,
+                        marker="^",
+                        s=20,
+                        color=COL_LUR,
+                        zorder=5,
+                        label="SAT update",
+                    )
 
             ax.set_title(sid, fontsize=8, fontweight="bold")
             ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
@@ -1125,7 +1297,8 @@ class TemporalVisualizer:
 
         fig.suptitle(
             suptitle + "\n(observed = validation only, not in Kalman filter)",
-            fontsize=10, y=1.01,
+            fontsize=10,
+            y=1.01,
         )
         plt.tight_layout()
         _save(fig, save_path)
@@ -1160,9 +1333,9 @@ class TemporalVisualizer:
         n = len(stations)
 
         nrows = (n + ncols - 1) // ncols
-        fig, axes = plt.subplots(nrows, ncols,
-                                 figsize=(5 * ncols, 4 * nrows),
-                                 constrained_layout=True)
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(5 * ncols, 4 * nrows), constrained_layout=True
+        )
         axes = np.atleast_1d(axes).flatten()
 
         z95 = 1.96
@@ -1176,14 +1349,14 @@ class TemporalVisualizer:
                 grp[date_col],
                 grp[pred_col] - z95 * grp[uncertainty_col],
                 grp[pred_col] + z95 * grp[uncertainty_col],
-                alpha=ALPHA_SHADE, color="steelblue", label="95% CI",
+                alpha=ALPHA_SHADE,
+                color="steelblue",
+                label="95% CI",
             )
             # Smoothed prediction
-            ax.plot(grp[date_col], grp[pred_col],
-                    color=COL_SSM, lw=2, label="Smoothed")
+            ax.plot(grp[date_col], grp[pred_col], color=COL_SSM, lw=2, label="Smoothed")
             # EPA observed — dots connected by line
-            ax.plot(grp[date_col], grp[obs_col],
-                    "b.-", ms=5, lw=1, label="Observed")
+            ax.plot(grp[date_col], grp[obs_col], "b.-", ms=5, lw=1, label="Observed")
 
             ax.set_title(sid, fontsize=9, fontweight="bold")
             ax.set_ylabel("NO₂ (µg/m³)", fontsize=8)
@@ -1203,21 +1376,41 @@ class TemporalVisualizer:
         _save(fig, save_path)
 
         # ── Standalone summary figure — daily mean across all stations ──────────
-        daily = station_preds.groupby(date_col).agg(
-            obs_mean=(obs_col, "mean"),
-            pred_mean=(pred_col, "mean"),
-            pred_std=(uncertainty_col, "mean"),
-        ).reset_index().sort_values(date_col)
+        daily = (
+            station_preds.groupby(date_col)
+            .agg(
+                obs_mean=(obs_col, "mean"),
+                pred_mean=(pred_col, "mean"),
+                pred_std=(uncertainty_col, "mean"),
+            )
+            .reset_index()
+            .sort_values(date_col)
+        )
 
         fig2, ax2 = plt.subplots(figsize=(9, 4))
-        ax2.fill_between(daily[date_col],
-                         daily["pred_mean"] - z95 * daily["pred_std"],
-                         daily["pred_mean"] + z95 * daily["pred_std"],
-                         alpha=ALPHA_SHADE, color="steelblue", label="95% CI")
-        ax2.plot(daily[date_col], daily["pred_mean"],
-                 color=COL_SSM, lw=2, label="Smoothed mean")
-        ax2.plot(daily[date_col], daily["obs_mean"],
-                 "b.-", ms=6, lw=1.2, label="Observed mean")
+        ax2.fill_between(
+            daily[date_col],
+            daily["pred_mean"] - z95 * daily["pred_std"],
+            daily["pred_mean"] + z95 * daily["pred_std"],
+            alpha=ALPHA_SHADE,
+            color="steelblue",
+            label="95% CI",
+        )
+        ax2.plot(
+            daily[date_col],
+            daily["pred_mean"],
+            color=COL_SSM,
+            lw=2,
+            label="Smoothed mean",
+        )
+        ax2.plot(
+            daily[date_col],
+            daily["obs_mean"],
+            "b.-",
+            ms=6,
+            lw=1.2,
+            label="Observed mean",
+        )
         ax2.set_title("All stations — daily mean NO₂", fontsize=11, fontweight="bold")
         ax2.set_ylabel("NO₂ (µg/m³)", fontsize=9)
         ax2.set_xlabel("Day", fontsize=9)
@@ -1253,15 +1446,18 @@ class TemporalVisualizer:
         daily[date_col] = pd.to_datetime(daily[date_col])
         daily = daily.sort_values(date_col)
 
-        highlighted = set(pd.to_datetime(d) for d in (highlighted_dates or []))
-        colours = [
-            COL_SSM if d in highlighted else "#cccccc"
-            for d in daily[date_col]
-        ]
+        highlighted = {pd.to_datetime(d) for d in (highlighted_dates or [])}
 
         fig, ax = plt.subplots(figsize=(10, 4), constrained_layout=True)
-        ax.plot(daily[date_col], daily[value_col], 
-            color=COL_SSM, lw=2, marker="o", ms=5, label="Daily mean")
+        ax.plot(
+            daily[date_col],
+            daily[value_col],
+            color=COL_SSM,
+            lw=2,
+            marker="o",
+            ms=5,
+            label="Daily mean",
+        )
 
         # Annotate highlighted bars
         for d in highlighted:
@@ -1275,7 +1471,6 @@ class TemporalVisualizer:
         ax.tick_params(labelsize=8)
         ax.grid(axis="y", alpha=0.3)
 
-        from matplotlib.patches import Patch
         ax.legend(
             handles=[
                 Patch(color=COL_SSM, label="Map days"),
@@ -1310,11 +1505,17 @@ class TemporalVisualizer:
         """
         dates = np.asarray(dates)
         ssm_mean = np.asarray(ssm_mean)
-        ssm_std  = np.asarray(ssm_std)
+        ssm_std = np.asarray(ssm_std)
 
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.fill_between(dates, ssm_mean - ssm_std, ssm_mean + ssm_std,
-                        alpha=ALPHA_SHADE, color=COL_SSM, label="±1σ")
+        ax.fill_between(
+            dates,
+            ssm_mean - ssm_std,
+            ssm_mean + ssm_std,
+            alpha=ALPHA_SHADE,
+            color=COL_SSM,
+            label="±1σ",
+        )
         ax.plot(dates, ssm_mean, color=COL_SSM, lw=2, label="GAM-SSM mean")
         if obs is not None:
             ax.plot(dates, obs, "k.", ms=5, label="Observed")
@@ -1332,6 +1533,7 @@ class TemporalVisualizer:
 # Model Comparison Visualiser
 # ---------------------------------------------------------------------------
 
+
 class ModelComparisonVisualizer:
     """Compare model outputs and cross-validation results."""
 
@@ -1346,15 +1548,17 @@ class ModelComparisonVisualizer:
     ) -> plt.Figure:
         """Leave-one-station-out cross-validation scatter.
 
-        Each station is plotted in a distinct colour.  An OLS regression line
+        Each station is plotted in a distinct colour. An OLS regression line
         and the 1:1 line are overlaid, with CV R² and Pearson r in the title.
 
         Parameters
         ----------
         cv_df : pd.DataFrame
-            One row per (station, date) with observed and LOOCV-predicted NO2.
+            One row per held-out station (n_stations rows total) with the
+            period-mean observed and LOOCV-predicted NO2 for that station.
+            This is a spatial-generalisation check, not a per-day comparison.
         """
-        y_obs  = cv_df[obs_col].values
+        y_obs = cv_df[obs_col].values
         y_pred = cv_df[pred_col].values
 
         slope, intercept, r_val, _, _ = linregress(y_pred, y_obs)
@@ -1362,7 +1566,7 @@ class ModelComparisonVisualizer:
 
         ss_res = np.sum((y_obs - y_pred) ** 2)
         ss_tot = np.sum((y_obs - np.mean(y_obs)) ** 2)
-        cv_r2  = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        cv_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
@@ -1370,22 +1574,45 @@ class ModelComparisonVisualizer:
         for i, sid in enumerate(stations):
             grp = cv_df[cv_df[station_col] == sid]
             colour = _STATION_PALETTE[i % len(_STATION_PALETTE)]
-            ax.scatter(grp[pred_col], grp[obs_col],
-                       s=18, alpha=0.75, color=colour,
-                       edgecolor="white", linewidth=0.5, label=sid)
+            ax.scatter(
+                grp[pred_col],
+                grp[obs_col],
+                s=18,
+                alpha=0.75,
+                color=colour,
+                edgecolor="white",
+                linewidth=0.5,
+            )
+            # Direct labels: with only n_stations points, a station-colour
+            # legend forces the reader to cross-reference; a direct label
+            # makes outliers identifiable at a glance.
+            for _, row in grp.iterrows():
+                ax.annotate(
+                    sid,
+                    (row[pred_col], row[obs_col]),
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                    fontsize=7,
+                )
 
-        ax.plot(x_line, intercept + slope * x_line,
-                color=COL_LUR, lw=1.5, label="Trend line", zorder=5)
+        ax.plot(
+            x_line,
+            intercept + slope * x_line,
+            color=COL_LUR,
+            lw=1.5,
+            label="Trend line",
+            zorder=5,
+        )
         lim_lo = min(y_obs.min(), y_pred.min()) * 0.9
         lim_hi = max(y_obs.max(), y_pred.max()) * 1.05
-        ax.plot([lim_lo, lim_hi], [lim_lo, lim_hi],
-                "r--", lw=1.2, label="1:1", zorder=4)
+        ax.plot(
+            [lim_lo, lim_hi], [lim_lo, lim_hi], "r--", lw=1.2, label="1:1", zorder=4
+        )
         ax.set_xlim(lim_lo, lim_hi)
         ax.set_ylim(lim_lo, lim_hi)
 
         ax.set_xlabel("LOOCV Predicted NO₂ (µg/m³)")
         ax.set_ylabel("Measured NO₂ (µg/m³)")
-        _annotate_r2(ax, y_obs, y_pred)
 
         t = title or f"LOOCV: Modelled vs Measured  (CV R²={cv_r2:.3f}, r={r_val:.3f})"
         ax.set_title(t, fontsize=10, fontweight="bold")
@@ -1412,12 +1639,26 @@ class ModelComparisonVisualizer:
             unique_labels = sorted(set(labels))
             for i, lbl in enumerate(unique_labels):
                 mask = np.array(labels) == lbl
-                ax.scatter(y_pred[mask], y_true[mask], s=20, alpha=0.75,
-                           color=_STATION_PALETTE[i % len(_STATION_PALETTE)],
-                           edgecolor="white", linewidth=0.4, label=lbl)
+                ax.scatter(
+                    y_pred[mask],
+                    y_true[mask],
+                    s=20,
+                    alpha=0.75,
+                    color=_STATION_PALETTE[i % len(_STATION_PALETTE)],
+                    edgecolor="white",
+                    linewidth=0.4,
+                    label=lbl,
+                )
         else:
-            ax.scatter(y_pred, y_true, s=20, alpha=0.75,
-                       color=COL_LUR, edgecolor="white", linewidth=0.4)
+            ax.scatter(
+                y_pred,
+                y_true,
+                s=20,
+                alpha=0.75,
+                color=COL_LUR,
+                edgecolor="white",
+                linewidth=0.4,
+            )
 
         lo = min(y_true.min(), y_pred.min())
         hi = max(y_true.max(), y_pred.max())
@@ -1446,7 +1687,7 @@ class ModelComparisonVisualizer:
             ``{model_name: {metric: value}}``.  Expected metrics:
             ``rmse``, ``mae``, ``r2``.
         """
-        models  = list(results.keys())
+        models = list(results.keys())
         metrics = ["rmse", "mae", "r2"]
         x = np.arange(len(metrics))
         width = 0.8 / len(models)
@@ -1469,6 +1710,7 @@ class ModelComparisonVisualizer:
 # Diagnostics Visualiser
 # ---------------------------------------------------------------------------
 
+
 class DiagnosticsVisualizer:
     """Residual and convergence diagnostic plots."""
 
@@ -1489,14 +1731,15 @@ class DiagnosticsVisualizer:
 
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
-        res    = y_true - y_pred
+        res = y_true - y_pred
 
         fig, axes = plt.subplots(2, 3, figsize=(15, 9))
 
         # (a) Observed vs Predicted
         ax = axes[0, 0]
-        ax.scatter(y_true, y_pred, alpha=0.6, s=20, c=COL_LUR,
-                   edgecolor="white", linewidth=0.4)
+        ax.scatter(
+            y_true, y_pred, alpha=0.6, s=20, c=COL_LUR, edgecolor="white", linewidth=0.4
+        )
         lo = min(y_true.min(), y_pred.min())
         hi = max(y_true.max(), y_pred.max())
         ax.plot([lo, hi], [lo, hi], "r--", lw=1.5, label="1:1")
@@ -1511,8 +1754,7 @@ class DiagnosticsVisualizer:
         ax = axes[0, 1]
         ax.hist(res, bins=30, color=COL_LUR, edgecolor="white", alpha=0.7)
         ax.axvline(0, color="red", ls="--", lw=1.5)
-        ax.axvline(res.mean(), color=COL_SSM, lw=1.5,
-                   label=f"Mean: {res.mean():.2f}")
+        ax.axvline(res.mean(), color=COL_SSM, lw=1.5, label=f"Mean: {res.mean():.2f}")
         ax.set_xlabel("Residual (µg/m³)")
         ax.set_ylabel("Frequency")
         ax.set_title("(b) Residual Distribution", fontsize=11, fontweight="bold")
@@ -1521,8 +1763,9 @@ class DiagnosticsVisualizer:
 
         # (c) Residuals vs Predicted
         ax = axes[0, 2]
-        ax.scatter(y_pred, res, alpha=0.6, s=20, c=COL_LUR,
-                   edgecolor="white", linewidth=0.4)
+        ax.scatter(
+            y_pred, res, alpha=0.6, s=20, c=COL_LUR, edgecolor="white", linewidth=0.4
+        )
         ax.axhline(0, color="red", ls="--", lw=1.5)
         ax.set_xlabel("Predicted NO₂ (µg/m³)")
         ax.set_ylabel("Residual (µg/m³)")
@@ -1539,15 +1782,17 @@ class DiagnosticsVisualizer:
         ax = axes[1, 1]
         n = len(res)
         max_lag = min(40, n // 4)
-        mean_r  = np.mean(res)
-        var_r   = np.var(res) + 1e-12
-        acf = np.array([
-            np.mean((res[:n - k] - mean_r) * (res[k:] - mean_r)) / var_r
-            for k in range(max_lag + 1)
-        ])
+        mean_r = np.mean(res)
+        var_r = np.var(res) + 1e-12
+        acf = np.array(
+            [
+                np.mean((res[: n - k] - mean_r) * (res[k:] - mean_r)) / var_r
+                for k in range(max_lag + 1)
+            ]
+        )
         ax.bar(range(len(acf)), acf, color=COL_LUR, edgecolor="white")
         ci = 1.96 / np.sqrt(n)
-        ax.axhline(ci,  color="red", ls="--", lw=1)
+        ax.axhline(ci, color="red", ls="--", lw=1)
         ax.axhline(-ci, color="red", ls="--", lw=1)
         ax.axhline(0, color="grey", lw=0.5)
         ax.set_xlabel("Lag")
@@ -1559,10 +1804,16 @@ class DiagnosticsVisualizer:
         window = max(len(res) // 50, 5)
         rs = pd.Series(res)
         roll_mean = rs.rolling(window, center=True).mean()
-        roll_std  = rs.rolling(window, center=True).std()
+        roll_std = rs.rolling(window, center=True).std()
         idx = np.arange(len(res))
-        ax.fill_between(idx, roll_mean - roll_std, roll_mean + roll_std,
-                        alpha=0.3, color=COL_LUR, label="±1 SD")
+        ax.fill_between(
+            idx,
+            roll_mean - roll_std,
+            roll_mean + roll_std,
+            alpha=0.3,
+            color=COL_LUR,
+            label="±1 SD",
+        )
         ax.plot(idx, roll_mean, color=COL_LUR, lw=1.5, label="Rolling mean")
         ax.axhline(0, color="red", ls="--", lw=1)
         ax.set_xlabel("Index")
@@ -1598,7 +1849,7 @@ class DiagnosticsVisualizer:
         tol : float
             Convergence tolerance used — drawn as reference line on panel b.
         """
-        ll   = np.asarray(log_likelihoods)
+        ll = np.asarray(log_likelihoods)
         iters = np.arange(len(ll))
 
         fig, axes = plt.subplots(1, 2, figsize=(10, 4))
@@ -1617,17 +1868,27 @@ class DiagnosticsVisualizer:
             status = "Yes" if converged else "No"
             info_lines.append(f"Converged: {status}")
         axes[0].text(
-            0.04, 0.97, "\n".join(info_lines),
+            0.04,
+            0.97,
+            "\n".join(info_lines),
             transform=axes[0].transAxes,
-            fontsize=9, va="top", ha="left",
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
+            fontsize=9,
+            va="top",
+            ha="left",
+            bbox={
+                "boxstyle": "round,pad=0.3",
+                "fc": "white",
+                "ec": "gray",
+                "alpha": 0.8,
+            },
         )
 
         if len(ll) > 1:
             diff = np.abs(np.diff(ll))
             axes[1].semilogy(iters[1:], diff, "o-", color=COL_SSM, ms=4)
-            axes[1].axhline(tol, color="red", ls="--", lw=1,
-                            label=f"Tolerance {tol:.0e}")
+            axes[1].axhline(
+                tol, color="red", ls="--", lw=1, label=f"Tolerance {tol:.0e}"
+            )
             axes[1].set_xlabel("EM Iteration")
             axes[1].set_ylabel("|ΔLog-Likelihood|")
             axes[1].set_title("(b) Increment", fontsize=11, fontweight="bold")
@@ -1670,12 +1931,12 @@ class DiagnosticsVisualizer:
 
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
-        y_std  = np.asarray(y_std)
+        y_std = np.asarray(y_std)
 
         nominal_levels = [0.50, 0.80, 0.90, 0.95, 0.99]
         empirical_coverages = []
-        interval_widths     = []
-        iss_scores          = []
+        interval_widths = []
+        iss_scores = []
 
         for alpha in nominal_levels:
             z = stats.norm.ppf(0.5 + alpha / 2)
@@ -1683,10 +1944,11 @@ class DiagnosticsVisualizer:
             upper = y_pred + z * y_std
             width = 2 * z * y_std
 
-            covered  = ((y_true >= lower) & (y_true <= upper)).mean()
-            penalty  = (2 / (1 - alpha)) * np.where(
-                y_true < lower, lower - y_true,
-                np.where(y_true > upper, y_true - upper, 0)
+            covered = ((y_true >= lower) & (y_true <= upper)).mean()
+            penalty = (2 / (1 - alpha)) * np.where(
+                y_true < lower,
+                lower - y_true,
+                np.where(y_true > upper, y_true - upper, 0),
             ).mean()
             iss = width.mean() + penalty
 
@@ -1695,25 +1957,38 @@ class DiagnosticsVisualizer:
             iss_scores.append(iss)
 
         crps = np.mean(
-            y_std * (
-                (y_true - y_pred) / y_std * (
-                    2 * stats.norm.cdf((y_true - y_pred) / y_std) - 1
-                )
+            y_std
+            * (
+                (y_true - y_pred)
+                / y_std
+                * (2 * stats.norm.cdf((y_true - y_pred) / y_std) - 1)
                 + 2 * stats.norm.pdf((y_true - y_pred) / y_std)
                 - 1 / np.sqrt(np.pi)
             )
         )
 
-        pct_labels = [f"{int(l*100)}%" for l in nominal_levels]
+        pct_labels = [f"{int(level * 100)}%" for level in nominal_levels]
         fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), constrained_layout=True)
 
         # (a) Reliability diagram
         ax = axes[0]
         ax.plot([0, 1], [0, 1], "k--", lw=1, label="Perfect calibration")
-        ax.plot(nominal_levels, empirical_coverages, "o-",
-                color=COL_LUR, lw=2, ms=7, label="Model")
-        ax.fill_between(nominal_levels, nominal_levels, empirical_coverages,
-                        alpha=0.15, color=COL_LUR)
+        ax.plot(
+            nominal_levels,
+            empirical_coverages,
+            "o-",
+            color=COL_LUR,
+            lw=2,
+            ms=7,
+            label="Model",
+        )
+        ax.fill_between(
+            nominal_levels,
+            nominal_levels,
+            empirical_coverages,
+            alpha=0.15,
+            color=COL_LUR,
+        )
         ax.set_xlabel("Nominal coverage", fontsize=9)
         ax.set_ylabel("Empirical coverage", fontsize=9)
         ax.set_title("(a) Reliability Diagram", fontsize=10, fontweight="bold")
@@ -1725,14 +2000,28 @@ class DiagnosticsVisualizer:
         ax.grid(True, alpha=0.3)
 
         # Annotate over/under confidence
-        mid_nom = nominal_levels[len(nominal_levels)//2]
-        mid_emp = empirical_coverages[len(nominal_levels)//2]
+        mid_nom = nominal_levels[len(nominal_levels) // 2]
+        mid_emp = empirical_coverages[len(nominal_levels) // 2]
         if mid_emp < mid_nom - 0.02:
-            ax.text(0.05, 0.92, "Overconfident\n(intervals too narrow)",
-                    transform=ax.transAxes, fontsize=7, color="red", alpha=0.7)
+            ax.text(
+                0.05,
+                0.92,
+                "Overconfident\n(intervals too narrow)",
+                transform=ax.transAxes,
+                fontsize=7,
+                color="red",
+                alpha=0.7,
+            )
         elif mid_emp > mid_nom + 0.02:
-            ax.text(0.05, 0.92, "Underconfident\n(intervals too wide)",
-                    transform=ax.transAxes, fontsize=7, color="orange", alpha=0.7)
+            ax.text(
+                0.05,
+                0.92,
+                "Underconfident\n(intervals too wide)",
+                transform=ax.transAxes,
+                fontsize=7,
+                color="orange",
+                alpha=0.7,
+            )
 
         # (b) Interval widths
         ax2 = axes[1]
@@ -1748,8 +2037,11 @@ class DiagnosticsVisualizer:
         ax3.bar(pct_labels, iss_scores, color=COL_LUR, alpha=0.8)
         ax3.set_xlabel("Nominal coverage level", fontsize=9)
         ax3.set_ylabel("Interval Skill Score (lower = better)", fontsize=9)
-        ax3.set_title(f"(c) Interval Skill Score  |  CRPS={crps:.3f}",
-                      fontsize=10, fontweight="bold")
+        ax3.set_title(
+            f"(c) Interval Skill Score  |  CRPS={crps:.3f}",
+            fontsize=10,
+            fontweight="bold",
+        )
         ax3.tick_params(axis="x", labelsize=8)
         ax3.grid(True, alpha=0.3, axis="y")
 
@@ -1785,16 +2077,15 @@ class DiagnosticsVisualizer:
         save_path : str or Path, optional
         """
         from libpysal.weights.spatial_lag import lag_spatial
-        from matplotlib.patches import Patch
 
-        z  = (residuals - residuals.mean()) / residuals.std()
+        z = (residuals - residuals.mean()) / residuals.std()
         wz = lag_spatial(spatial_weights, z)
 
         # Quadrant masks
         hh = (z >= 0) & (wz >= 0)
-        ll = (z <  0) & (wz <  0)
-        hl = (z >= 0) & (wz <  0)
-        lh = (z <  0) & (wz >= 0)
+        ll = (z < 0) & (wz < 0)
+        hl = (z >= 0) & (wz < 0)
+        lh = (z < 0) & (wz >= 0)
 
         colours = np.empty(len(z), dtype=object)
         colours[hh] = "#d73027"
@@ -1802,7 +2093,11 @@ class DiagnosticsVisualizer:
         colours[hl] = "#fc8d59"
         colours[lh] = "#91bfdb"
 
-        sig = "p < 0.001" if moran_result.p_sim < 0.001 else f"p = {moran_result.p_sim:.3f}"
+        sig = (
+            "p < 0.001"
+            if moran_result.p_sim < 0.001
+            else f"p = {moran_result.p_sim:.3f}"
+        )
 
         fig, (ax_scatter, ax_hist) = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -1812,7 +2107,7 @@ class DiagnosticsVisualizer:
         ax_scatter.scatter(z, wz, c=colours, s=2, alpha=0.5, linewidths=0)
 
         xlim = max(np.abs(z).max(), np.abs(wz).max()) * 1.05
-        xs   = np.array([-xlim, xlim])
+        xs = np.array([-xlim, xlim])
         ax_scatter.plot(xs, moran_result.I * xs, "k-", lw=1.5)
 
         legend_elements = [
@@ -1824,9 +2119,13 @@ class DiagnosticsVisualizer:
         ax_scatter.legend(handles=legend_elements, fontsize=8, loc="upper left")
         ax_scatter.annotate(
             f"Moran's I = {moran_result.I:.4f}\nz = {moran_result.z_norm:.3f}  {sig}",
-            xy=(0.97, 0.03), xycoords="axes fraction",
-            ha="right", va="bottom", fontsize=9, fontweight="bold",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+            xy=(0.97, 0.03),
+            xycoords="axes fraction",
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
         )
         ax_scatter.set_xlabel("Standardised residual", fontsize=10)
         ax_scatter.set_ylabel("Spatial lag of standardised residual", fontsize=10)
@@ -1837,29 +2136,163 @@ class DiagnosticsVisualizer:
         # ── Right: permutation distribution ─────────────────────────────────
         if hasattr(moran_result, "sim") and moran_result.sim is not None:
             sim_vals = moran_result.sim
-            ax_hist.hist(sim_vals, bins=40, color="steelblue", alpha=0.7,
-                         edgecolor="white", linewidth=0.4,
-                         label=f"Permuted I (n={len(sim_vals)})")
-            ax_hist.axvline(moran_result.I, color="#d73027", lw=2,
-                            label=f"Observed I = {moran_result.I:.4f}")
-            ax_hist.axvline(moran_result.EI, color="k", lw=1.2, linestyle="--",
-                            label=f"E[I] = {moran_result.EI:.4f}")
+            ax_hist.hist(
+                sim_vals,
+                bins=40,
+                color="steelblue",
+                alpha=0.7,
+                edgecolor="white",
+                linewidth=0.4,
+                label=f"Permuted I (n={len(sim_vals)})",
+            )
+            ax_hist.axvline(
+                moran_result.I,
+                color="#d73027",
+                lw=2,
+                label=f"Observed I = {moran_result.I:.4f}",
+            )
+            ax_hist.axvline(
+                moran_result.EI,
+                color="k",
+                lw=1.2,
+                linestyle="--",
+                label=f"E[I] = {moran_result.EI:.4f}",
+            )
             ax_hist.legend(fontsize=8)
             ax_hist.set_xlabel("Moran's I (permuted)", fontsize=10)
             ax_hist.set_ylabel("Frequency", fontsize=10)
             ax_hist.annotate(
                 f"{sig}\nz = {moran_result.z_norm:.3f}",
-                xy=(0.97, 0.97), xycoords="axes fraction",
-                ha="right", va="top", fontsize=9, fontweight="bold",
-                bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+                xy=(0.97, 0.97),
+                xycoords="axes fraction",
+                ha="right",
+                va="top",
+                fontsize=9,
+                fontweight="bold",
+                bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
             )
         else:
-            ax_hist.text(0.5, 0.5, "Permutation distribution\nnot available",
-                         ha="center", va="center", transform=ax_hist.transAxes,
-                         fontsize=10, color="grey")
-        ax_hist.set_title("(b) Permutation Distribution", fontsize=11, fontweight="bold")
+            ax_hist.text(
+                0.5,
+                0.5,
+                "Permutation distribution\nnot available",
+                ha="center",
+                va="center",
+                transform=ax_hist.transAxes,
+                fontsize=10,
+                color="grey",
+            )
+        ax_hist.set_title(
+            "(b) Permutation Distribution", fontsize=11, fontweight="bold"
+        )
 
         fig.suptitle(title, fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save(fig, save_path)
+        return fig
+
+    def plot_calibration_scatter(
+        self,
+        calibration,
+        title: str = "TROPOMI–EPA colocation calibration",
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> plt.Figure:
+        """Satellite-to-surface OLS calibration scatter, styled to match the
+        original scripts/tropomi_epa_scatter.py: one marker shape per station,
+        TROPOMI VCD displayed scaled (x1e-4 mol/m^2), fit line + r^2/N equation.
+
+        Plots calibration.collocated (the exact station-satellite pairs the
+        pipeline's CalibrationResult was fit on, from
+        SpatiotemporalDataset.calibrate_dense_obs) -- not a re-derivation
+        from raw CSVs, so this always matches what the model actually used.
+
+        Parameters
+        ----------
+        calibration : CalibrationResult
+            Output of calibrate_dense_obs(), with collocated populated.
+        save_path : str or Path, optional
+        """
+        merged = calibration.collocated
+        if merged is None or len(merged) == 0:
+            fig, ax = plt.subplots(figsize=(6, 5))
+            ax.text(
+                0.5,
+                0.5,
+                "No collocated calibration data available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                color="grey",
+            )
+            _save(fig, save_path)
+            return fig
+
+        SCALE = 1e4  # display TROPOMI as x10^-4 mol/m^2, matching the original script
+        x_raw = merged["obs_dense"].values
+        x_scaled = x_raw * SCALE
+        y = merged["obs_value"].values
+        n = calibration.n_collocated
+        r2 = calibration.r**2
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        markers = ["o", "x", "+", "s", "^", "D", "v", "P", "*"]
+        for i, stn in enumerate(sorted(merged["station_id"].unique())):
+            mask = merged["station_id"].values == stn
+            ax.scatter(
+                x_scaled[mask],
+                y[mask],
+                label=stn,
+                marker=markers[i % len(markers)],
+                s=45,
+                alpha=0.85,
+                color="steelblue",
+                zorder=3,
+            )
+
+        x_line_raw = np.linspace(x_raw.min(), x_raw.max(), 200)
+        ax.plot(
+            x_line_raw * SCALE,
+            calibration.beta0 + calibration.beta1 * x_line_raw,
+            color="black",
+            lw=1.5,
+            zorder=4,
+            label="OLS fit",
+        )
+
+        # beta1 was fit on raw (unscaled) obs_dense; convert to "per scaled
+        # unit" for display, matching the original script's own OLS on x_scaled
+        slope_scaled = calibration.beta1 / SCALE
+        sign = "+" if calibration.beta0 >= 0 else "-"
+        eq_text = (
+            f"$C_{{\\mathrm{{EPA}}}} = {slope_scaled:.2f}\\,C_{{\\mathrm{{TROP}}}} "
+            f"{sign} {abs(calibration.beta0):.2f}$\n"
+            f"$r^2 = {r2:.3f}$,  $N = {n}$"
+        )
+        ax.annotate(
+            eq_text,
+            xy=(0.04, 0.96),
+            xycoords="axes fraction",
+            ha="left",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "white",
+                "edgecolor": "grey",
+                "alpha": 0.85,
+            },
+        )
+
+        ax.set_xlabel(
+            r"TROPOMI VCD, $C_{\mathrm{TROP}}$ ($\times 10^{-4}$ mol/m$^{2}$)",
+            fontsize=10,
+        )
+        ax.set_ylabel(r"EPA surface NO$_2$ ($\mu$g/m$^{3}$)", fontsize=10)
+        ax.set_title(title, fontsize=11, fontweight="bold")
+        ax.legend(fontsize=7, ncol=2, loc="upper right", framealpha=0.85)
+        ax.grid(True, linestyle="--", alpha=0.35)
+
         plt.tight_layout()
         _save(fig, save_path)
         return fig
@@ -1891,17 +2324,22 @@ class DiagnosticsVisualizer:
         R = np.where(np.isnan(residual_matrix), 0.0, residual_matrix)
         _, s, _ = np.linalg.svd(R, full_matrices=False)
 
-        var_total = (s ** 2).sum()
-        var_pct   = (s ** 2) / var_total * 100
-        cumvar    = np.cumsum(var_pct)
-        ks        = np.arange(1, k_max + 1)
+        var_total = (s**2).sum()
+        var_pct = (s**2) / var_total * 100
+        cumvar = np.cumsum(var_pct)
+        ks = np.arange(1, k_max + 1)
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
         # (a) Scree
         ax1.plot(ks, var_pct[:k_max], "o-", color="steelblue", lw=1.5, ms=6)
-        ax1.axvline(k_chosen, color="#d73027", lw=1.5, linestyle="--",
-                    label=f"k = {k_chosen} (chosen)")
+        ax1.axvline(
+            k_chosen,
+            color="#d73027",
+            lw=1.5,
+            linestyle="--",
+            label=f"k = {k_chosen} (chosen)",
+        )
         ax1.set_xlabel("Number of factors (k)", fontsize=10)
         ax1.set_ylabel("Variance explained (%)", fontsize=10)
         ax1.set_title("(a) Scree Plot", fontsize=11, fontweight="bold")
@@ -1911,14 +2349,21 @@ class DiagnosticsVisualizer:
 
         # (b) Cumulative
         ax2.plot(ks, cumvar[:k_max], "s-", color="darkorange", lw=1.5, ms=6)
-        ax2.axvline(k_chosen, color="#d73027", lw=1.5, linestyle="--",
-                    label=f"k = {k_chosen}: {cumvar[k_chosen - 1]:.1f}%")
-        ax2.axhline(85, color="grey", lw=1, linestyle=":", alpha=0.7,
-                    label="85% threshold")
+        ax2.axvline(
+            k_chosen,
+            color="#d73027",
+            lw=1.5,
+            linestyle="--",
+            label=f"k = {k_chosen}: {cumvar[k_chosen - 1]:.1f}%",
+        )
+        ax2.axhline(
+            85, color="grey", lw=1, linestyle=":", alpha=0.7, label="85% threshold"
+        )
         ax2.set_xlabel("Number of factors (k)", fontsize=10)
         ax2.set_ylabel("Cumulative variance explained (%)", fontsize=10)
-        ax2.set_title("(b) Cumulative Variance Explained", fontsize=11,
-                      fontweight="bold")
+        ax2.set_title(
+            "(b) Cumulative Variance Explained", fontsize=11, fontweight="bold"
+        )
         ax2.set_xticks(ks)
         ax2.legend(fontsize=9)
         ax2.grid(True, alpha=0.3)
@@ -1928,10 +2373,56 @@ class DiagnosticsVisualizer:
         _save(fig, save_path)
         return fig
 
+    def plot_factor_heatmap(
+        self,
+        temporal_factors: pd.DataFrame,
+        n_dynamic: int = 3,
+        title: str = "SSM Latent Factors x Day (dynamic alpha_t block)",
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> plt.Figure:
+        """Heatmap of the dynamic SSM factors (alpha_t) over the study period.
+
+        Only the leading ``n_dynamic`` columns are shown -- the augmented
+        state's fixed-effect entries (beta, B_tilde) are excluded since they
+        are near-constant across t by construction and would not be
+        informative on a per-day heatmap. Useful for spotting boundary-day
+        drift artifacts (RTS-smoothed estimates are least reliable at the
+        first/last day of a finite series) that may not show up in a
+        representative-day map selection.
+
+        Parameters
+        ----------
+        temporal_factors : pd.DataFrame
+            Output written to ``ssm_temporal_factors.csv`` -- one row per
+            date, columns ``date, factor_1, factor_2, ...``.
+        n_dynamic : int
+            Number of leading dynamic factors to display (state_dim).
+        save_path : str or Path, optional
+        """
+        dates = temporal_factors["date"].astype(str).tolist()
+        factor_cols = [f"factor_{i + 1}" for i in range(n_dynamic)]
+        factors = temporal_factors[factor_cols].values.T  # (n_dynamic, T)
+
+        vmax = np.abs(factors).max()
+        fig, ax = plt.subplots(
+            figsize=(max(10, 0.4 * len(dates)), 1.2 * n_dynamic + 1.5)
+        )
+        im = ax.imshow(factors, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+        ax.set_yticks(range(n_dynamic))
+        ax.set_yticklabels([f"Factor {i + 1}" for i in range(n_dynamic)])
+        ax.set_xticks(range(len(dates)))
+        ax.set_xticklabels(dates, rotation=90, fontsize=7)
+        ax.set_title(title, fontsize=11, fontweight="bold")
+        plt.colorbar(im, ax=ax, label="Factor value", shrink=0.8)
+        plt.tight_layout()
+        _save(fig, save_path)
+        return fig
+
 
 # ---------------------------------------------------------------------------
 # Convenience factory
 # ---------------------------------------------------------------------------
+
 
 def create_publication_figure_set(
     model,
@@ -1986,29 +2477,34 @@ def create_publication_figure_set(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     gids = list(model.location_ids_) if hasattr(model, "location_ids_") else None
-    sv   = SpatialVisualizer(grid_gdf=grid_gdf, grid_ids=gids)
-    tv   = TemporalVisualizer()
-    cv   = ModelComparisonVisualizer()
-    dv   = DiagnosticsVisualizer()
+    sv = SpatialVisualizer(grid_gdf=grid_gdf, grid_ids=gids)
+    tv = TemporalVisualizer()
+    cv = ModelComparisonVisualizer()
+    dv = DiagnosticsVisualizer()
 
     # Build station lat/lon lookup from station_preds + grid centroid
     station_loc_df = None
     if station_preds is not None and grid_gdf is not None:
-        import geopandas as gpd
         grid_centroids = grid_gdf.copy()
         grid_centroids["longitude"] = grid_gdf.geometry.centroid.to_crs("EPSG:4326").x
-        grid_centroids["latitude"]  = grid_gdf.geometry.centroid.to_crs("EPSG:4326").y
-        sta_grid = (station_preds[["station_id", "grid_id"]]
-                    .drop_duplicates()
-                    .merge(grid_centroids[["grid_id", "latitude", "longitude"]],
-                           on="grid_id", how="left"))
+        grid_centroids["latitude"] = grid_gdf.geometry.centroid.to_crs("EPSG:4326").y
+        sta_grid = (
+            station_preds[["station_id", "grid_id"]]
+            .drop_duplicates()
+            .merge(
+                grid_centroids[["grid_id", "latitude", "longitude"]],
+                on="grid_id",
+                how="left",
+            )
+        )
         station_loc_df = sta_grid.dropna(subset=["latitude", "longitude"])
 
     # GAM LUR prior map
     if hasattr(model, "gam_") and model.gam_ is not None:
         lur_pred = model.gam_.predict(model._X_train)
         sv.plot_surface(
-            lur_pred, title="GAM LUR — Annual Mean NO₂",
+            lur_pred,
+            title="GAM LUR — Annual Mean NO₂",
             basemap=True,
             station_df=station_loc_df,
             save_path=output_dir / "static_lur_prior.png",
@@ -2023,14 +2519,18 @@ def create_publication_figure_set(
             save_path=output_dir / "spatial_residuals.png",
         )
         dv.plot_residual_panel(
-            model._y_train, lur_pred,
+            model._y_train,
+            lur_pred,
             title="GAM LUR — Residual Diagnostics",
             save_path=output_dir / "residual_diagnostics.png",
         )
 
     # EM convergence
-    if (hasattr(model, "ssm_") and model.ssm_ is not None
-            and model.ssm_.em_result_ is not None):
+    if (
+        hasattr(model, "ssm_")
+        and model.ssm_ is not None
+        and model.ssm_.em_result_ is not None
+    ):
         er = model.ssm_.em_result_
         em_tol = getattr(model, "em_tol", 1e-4)
         dv.plot_convergence(
@@ -2041,21 +2541,37 @@ def create_publication_figure_set(
             save_path=output_dir / "em_convergence.png",
         )
 
-    # Daily snapshots — pick 4 days spanning min/low/high/max daily-mean NO₂
+    # Daily snapshots — pick 4 days spanning min/low/high/max daily-mean NO₂.
+    # The first and last calendar day of the study period are excluded from
+    # eligibility: RTS-smoothed estimates are least reliable at the
+    # boundaries of a finite series (no future data constrains the last
+    # day, no past data constrains the first), so a boundary day spuriously
+    # ranking as "max" or "min" reflects smoother edge uncertainty rather
+    # than a genuine extreme -- showcasing it as representative would be
+    # misleading rather than illustrative.
     if ssm_df is not None:
         dates = selected_dates
         if dates is None:
-            daily_mean = ssm_df.groupby("date")["no2"].mean().sort_values()
+            all_dates_sorted = sorted(ssm_df["date"].unique())
+            interior_dates = (
+                all_dates_sorted[1:-1]
+                if len(all_dates_sorted) > 2
+                else all_dates_sorted
+            )
+            eligible = ssm_df[ssm_df["date"].isin(interior_dates)]
+            daily_mean = eligible.groupby("date")["no2"].mean().sort_values()
             n = len(daily_mean)
             idx = sorted({0, n // 3, 2 * n // 3, n - 1})
             dates = [daily_mean.index[i] for i in idx]
         sv.plot_daily_snapshots(
-            ssm_df, dates=dates,
+            ssm_df,
+            dates=dates,
             suptitle="GAM-SSM Daily NO₂ — low → high pollution days",
             save_path=output_dir / "ssm_selected_days.png",
         )
         tv.plot_daily_mean_barchart(
-            ssm_df, highlighted_dates=dates,
+            ssm_df,
+            highlighted_dates=dates,
             title=(
                 "Daily Area-Mean NO₂\n"
                 # "Highlighted days selected to span the observed temporal range "
@@ -2074,12 +2590,12 @@ def create_publication_figure_set(
     # LOOCV scatter
     if cv_df is not None:
         cv.plot_loocv_scatter(
-            cv_df, save_path=output_dir / "loocv_scatter.png",
+            cv_df,
+            save_path=output_dir / "loocv_scatter.png",
         )
 
     # Wind sector map (requires fitted GAM + feature DataFrame)
-    if (X_train_df is not None
-            and hasattr(model, "gam_") and model.gam_ is not None):
+    if X_train_df is not None and hasattr(model, "gam_") and model.gam_ is not None:
         sv.plot_wind_sector_map(
             model.gam_,
             X_train_df,
@@ -2087,13 +2603,12 @@ def create_publication_figure_set(
         )
 
     # GAM map + wind rose inset (requires ERA5 wind data)
-    # This map is a bit hacky..Also dont like the position of the 
-    # wind rose legend, but it was a challenge to fit it in without 
-    # obscuring the map. I will probably not use it in 
+    # This map is a bit hacky..Also dont like the position of the
+    # wind rose legend, but it was a challenge to fit it in without
+    # obscuring the map. I will probably not use it in
     # results presented this time.
 
-    if (wind_df is not None
-            and hasattr(model, "gam_") and model.gam_ is not None):
+    if wind_df is not None and hasattr(model, "gam_") and model.gam_ is not None:
         lur_vals = model.gam_.predict(model._X_train)
         sv.plot_gam_with_wind_rose(
             lur_vals,

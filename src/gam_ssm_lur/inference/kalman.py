@@ -1,9 +1,9 @@
 """
-Kalman Filter and Rauch-Tung-Striebel Smoother Implementation.
+Kalman filter and Rauch-Tung-Striebel smoother for linear Gaussian SSMs.
 
-This module provides memory-efficient implementations of the Kalman filter
-and RTS smoother for linear Gaussian state space models, with support for
-different scalability modes (dense, diagonal, block-diagonal).
+Three matrix backends (dense / diagonal / block-diagonal) so the same
+recursions scale from a handful of latent factors up to spatial grids with
+thousands of locations.
 
 References
 ----------
@@ -17,37 +17,21 @@ References
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Literal, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy import sparse
-from scipy.sparse import csr_matrix, diags
-from scipy.sparse.linalg import spsolve
 from scipy.linalg import cho_factor, cho_solve, solve_triangular
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
 
 
 @dataclass
 class FilteredState:
-    """Container for Kalman filter output at a single time step.
-    
-    Attributes
-    ----------
-    mean : NDArray
-        Filtered state mean estimate, shape (state_dim,)
-    covariance : NDArray
-        Filtered state covariance, shape (state_dim, state_dim) or (state_dim,)
-        for diagonal approximation
-    predicted_mean : NDArray
-        One-step-ahead predicted state mean
-    predicted_covariance : NDArray
-        One-step-ahead predicted state covariance
-    kalman_gain : NDArray
-        Kalman gain matrix used in update step
-    log_likelihood : float
-        Log-likelihood contribution from this time step
-    """
+    """Kalman filter output at a single time step."""
+
     mean: NDArray
     covariance: NDArray
     predicted_mean: NDArray
@@ -58,17 +42,8 @@ class FilteredState:
 
 @dataclass
 class SmoothedState:
-    """Container for RTS smoother output at a single time step.
-    
-    Attributes
-    ----------
-    mean : NDArray
-        Smoothed state mean estimate
-    covariance : NDArray
-        Smoothed state covariance
-    cross_covariance : NDArray
-        Cross-covariance E[α_t α_{t-1}^T | y_{1:T}] for EM algorithm
-    """
+    """RTS smoother output at a single time step (cross_covariance feeds the EM M-step)."""
+
     mean: NDArray
     covariance: NDArray
     cross_covariance: Optional[NDArray] = None
@@ -76,21 +51,8 @@ class SmoothedState:
 
 @dataclass
 class FilterResult:
-    """Complete Kalman filter results across all time steps.
-    
-    Attributes
-    ----------
-    filtered_means : NDArray
-        Filtered state means, shape (T, state_dim)
-    filtered_covariances : NDArray
-        Filtered covariances, shape (T, state_dim, state_dim) or (T, state_dim)
-    predicted_means : NDArray
-        Predicted state means, shape (T, state_dim)
-    predicted_covariances : NDArray
-        Predicted covariances
-    log_likelihood : float
-        Total log-likelihood
-    """
+    """Kalman filter output across all T time steps."""
+
     filtered_means: NDArray
     filtered_covariances: NDArray
     predicted_means: NDArray
@@ -99,54 +61,18 @@ class FilterResult:
 
 
 class KalmanFilter:
-    """Memory-efficient Kalman filter with adaptive matrix representation.
-    
-    Implements the standard Kalman filter recursions with support for three
-    scalability modes:
-    - 'dense': Full matrix operations for small problems (n < 1000)
-    - 'diagonal': Diagonal covariance approximation for medium problems
-    - 'block': Block-diagonal decomposition for large problems (n > 5000)
-    
-    Parameters
-    ----------
-    state_dim : int
-        Dimension of the latent state vector
-    obs_dim : int
-        Dimension of the observation vector
-    mode : {'auto', 'dense', 'diagonal', 'block'}
-        Scalability mode. 'auto' selects based on state_dim.
-    block_size : int, optional
-        Block size for block-diagonal mode. Default is 500.
-    regularization : float
-        Small constant added to matrices for numerical stability.
-        
-    Attributes
-    ----------
-    T : NDArray
-        State transition matrix, shape (state_dim, state_dim)
-    Z : NDArray
-        Observation matrix, shape (obs_dim, state_dim)
-    Q : NDArray
-        Process noise covariance
-    H : NDArray
-        Observation noise covariance
-    R : NDArray
-        Noise selection matrix (defaults to identity)
-        
-    Examples
-    --------
-    >>> kf = KalmanFilter(state_dim=100, obs_dim=100, mode='auto')
-    >>> kf.initialize(T=T_matrix, Z=Z_matrix, Q=Q_matrix, H=H_matrix)
-    >>> result = kf.filter(observations)
+    """Kalman filter with dense / diagonal / block-diagonal backends, chosen
+    automatically from state_dim unless mode is set explicitly. Time-varying
+    Z_t (regression effects on known, time-varying covariates; Durbin &
+    Koopman, 2012, Sec. 3.1) is supported in dense mode only.
     """
-    
-    # Thresholds for automatic mode selection.
-    # For spatial SSMs the state_dim = n_locations. Dense mode fits
-    # n²×3 parameters via EM which is underdetermined even for ~50 cells,
-    # so 'auto' defaults to diagonal for all realistic spatial grids.
-    DENSE_THRESHOLD = 10       # only use dense for toy problems
-    DIAGONAL_THRESHOLD = 5000  # diagonal → block for very large grids
-    
+
+    # For spatial SSMs state_dim = n_locations. Dense mode fits n^2 x 3
+    # parameters via EM, underdetermined even for ~50 cells -- 'auto'
+    # therefore defaults to diagonal for any realistic spatial grid.
+    DENSE_THRESHOLD = 10  # only use dense for toy problems
+    DIAGONAL_THRESHOLD = 5000  # diagonal -> block for very large grids
+
     def __init__(
         self,
         state_dim: int,
@@ -159,35 +85,29 @@ class KalmanFilter:
         self.obs_dim = obs_dim
         self.block_size = block_size
         self.regularization = regularization
-        
-        # Determine mode automatically if requested
-        if mode == "auto":
-            self.mode = self._select_mode(state_dim)
-        else:
-            self.mode = mode
-            
-        # Initialize matrices to None
+        self.mode = self._select_mode(state_dim) if mode == "auto" else mode
+
         self.T: Optional[NDArray] = None
         self.Z: Optional[NDArray] = None
         self.Q: Optional[NDArray] = None
         self.H: Optional[NDArray] = None
         self.R: Optional[NDArray] = None
-        
-        # Initial state
+
+        # set in initialize() if Z is passed as a (T_len, obs_dim, state_dim) sequence
+        self._time_varying_Z: bool = False
+        self._Z_sequence: Optional[NDArray] = None
+
         self.initial_mean: Optional[NDArray] = None
         self.initial_covariance: Optional[NDArray] = None
-        
         self._initialized = False
-        
+
     def _select_mode(self, n: int) -> str:
-        """Select scalability mode based on problem size."""
         if n < self.DENSE_THRESHOLD:
             return "dense"
         elif n < self.DIAGONAL_THRESHOLD:
             return "diagonal"
-        else:
-            return "block"
-            
+        return "block"
+
     def initialize(
         self,
         T: NDArray,
@@ -198,71 +118,60 @@ class KalmanFilter:
         initial_mean: Optional[NDArray] = None,
         initial_covariance: Optional[NDArray] = None,
     ) -> None:
-        """Initialize filter with system matrices.
-        
-        Parameters
-        ----------
-        T : NDArray
-            State transition matrix
-        Z : NDArray
-            Observation matrix
-        Q : NDArray
-            Process noise covariance
-        H : NDArray
-            Observation noise covariance
-        R : NDArray, optional
-            Noise selection matrix. Defaults to identity.
-        initial_mean : NDArray, optional
-            Initial state mean. Defaults to zeros.
-        initial_covariance : NDArray, optional
-            Initial state covariance. Defaults to identity.
+        """Set system matrices. Z may be (obs_dim, state_dim) or, for
+        time-varying observation loadings, (T_len, obs_dim, state_dim) --
+        the latter requires mode='dense'.
         """
         self.T = self._convert_matrix(T)
-        self.Z = self._convert_matrix(Z)
+
+        Z_arr = np.asarray(Z)
+        self._time_varying_Z = Z_arr.ndim == 3
+        if self._time_varying_Z:
+            if self.mode != "dense":
+                raise ValueError(
+                    f"Time-varying Z requires mode='dense' (got mode={self.mode!r})."
+                )
+            self._Z_sequence = Z_arr
+            self.Z = self._Z_sequence[0]  # placeholder; set per-timestep in filter()
+        else:
+            self._Z_sequence = None
+            self.Z = self._convert_matrix(Z)
+
         self.Q = self._convert_matrix(Q)
         self.H = self._convert_matrix(H)
         self.R = self._convert_matrix(R) if R is not None else self._identity()
-        
-        # Initialize state
-        if initial_mean is not None:
-            self.initial_mean = np.asarray(initial_mean)
-        else:
-            self.initial_mean = np.zeros(self.state_dim)
-            
-        if initial_covariance is not None:
-            self.initial_covariance = self._convert_matrix(initial_covariance)
-        else:
-            self.initial_covariance = self._identity()
-            
+        self.initial_mean = (
+            np.asarray(initial_mean)
+            if initial_mean is not None
+            else np.zeros(self.state_dim)
+        )
+        self.initial_covariance = (
+            self._convert_matrix(initial_covariance)
+            if initial_covariance is not None
+            else self._identity()
+        )
         self._initialized = True
-        
+
     def _convert_matrix(self, M: NDArray) -> NDArray:
-        """Convert matrix to appropriate format based on mode."""
         if self.mode == "dense":
             return np.asarray(M)
         elif self.mode == "diagonal":
-            # Store only diagonal
             if M.ndim == 2:
                 return np.diag(M) if M.shape[0] == M.shape[1] else M
             return M
         else:  # block
-            if sparse.issparse(M):
-                return M.tocsr()
-            return csr_matrix(M)
-            
+            return M.tocsr() if sparse.issparse(M) else csr_matrix(M)
+
     def _identity(self) -> NDArray:
-        """Create identity matrix in appropriate format."""
         if self.mode == "dense":
             return np.eye(self.state_dim)
         elif self.mode == "diagonal":
             return np.ones(self.state_dim)
-        else:
-            return sparse.eye(self.state_dim, format="csr")
-            
+        return sparse.eye(self.state_dim, format="csr")
+
     def _matrix_multiply(self, A: NDArray, B: NDArray) -> NDArray:
-        """Matrix multiplication with mode-appropriate handling."""
         if self.mode == "diagonal":
-            # Element-wise for diagonal matrices stored as vectors
+            # diagonal matrices stored as vectors -> elementwise
             if A.ndim == 1 and B.ndim == 1:
                 return A * B
             elif A.ndim == 1:
@@ -270,93 +179,75 @@ class KalmanFilter:
             elif B.ndim == 1:
                 return A * B
             return A @ B
-        # Sparse/block modes need vector reshaping to avoid (n,k),(k,)-> errors
+        # sparse/block: avoid (n,k) @ (k,) shape errors
         if sparse.issparse(A) and B.ndim == 1:
-            result = A @ B.reshape(-1, 1)
-            return np.asarray(result).ravel()
-        if sparse.issparse(A) and B.ndim == 2 and B.shape[0] == 1 and B.shape[1] == A.shape[1]:
-            result = A @ B.T
-            return np.asarray(result).ravel()
+            return np.asarray(A @ B.reshape(-1, 1)).ravel()
+        if (
+            sparse.issparse(A)
+            and B.ndim == 2
+            and B.shape[0] == 1
+            and B.shape[1] == A.shape[1]
+        ):
+            return np.asarray(A @ B.T).ravel()
         return A @ B
-        
+
     def _solve(self, A: NDArray, b: NDArray) -> NDArray:
-        """Solve linear system Ax = b."""
         if self.mode == "diagonal":
             return b / (A + self.regularization)
         elif self.mode == "block":
-            A_reg = A + self.regularization * sparse.eye(A.shape[0])
-            return spsolve(A_reg, b)
-        else:
-            A_reg = A + self.regularization * np.eye(A.shape[0])
-            return np.linalg.solve(A_reg, b)
-            
+            return spsolve(A + self.regularization * sparse.eye(A.shape[0]), b)
+        return np.linalg.solve(A + self.regularization * np.eye(A.shape[0]), b)
+
     def _inverse(self, A: NDArray) -> NDArray:
-        """Compute matrix inverse or pseudo-inverse."""
         if self.mode == "diagonal":
             return 1.0 / (A + self.regularization)
-        else:
-            A_reg = A + self.regularization * np.eye(A.shape[0])
-            try:
-                return np.linalg.inv(A_reg)
-            except np.linalg.LinAlgError:
-                return np.linalg.pinv(A_reg)
-                
+        A_reg = A + self.regularization * np.eye(A.shape[0])
+        try:
+            return np.linalg.inv(A_reg)
+        except np.linalg.LinAlgError:
+            return np.linalg.pinv(A_reg)
+
     def _transpose(self, A: NDArray) -> NDArray:
-        """Matrix transpose."""
         if self.mode == "diagonal":
-            return A  # Diagonal is symmetric
-        elif sparse.issparse(A):
-            return A.T
+            return A  # diagonal is symmetric
         return A.T
-        
+
     def _add_matrices(self, A: NDArray, B: NDArray) -> NDArray:
-        """Add two matrices."""
         return A + B
-        
+
     def _compute_log_likelihood(
-        self, 
-        innovation: NDArray, 
-        innovation_covariance: NDArray
+        self, innovation: NDArray, innovation_covariance: NDArray
     ) -> float:
-        """Compute log-likelihood contribution from innovation."""
         n = len(innovation)
-        
         if self.mode == "diagonal":
             log_det = np.sum(np.log(innovation_covariance + self.regularization))
-            quad_form = np.sum(innovation**2 / (innovation_covariance + self.regularization))
+            quad_form = np.sum(
+                innovation**2 / (innovation_covariance + self.regularization)
+            )
         else:
-            # Use Cholesky for numerical stability
             try:
-                L = np.linalg.cholesky(innovation_covariance + self.regularization * np.eye(n))
+                L = np.linalg.cholesky(
+                    innovation_covariance + self.regularization * np.eye(n)
+                )
                 log_det = 2 * np.sum(np.log(np.diag(L)))
                 v = np.linalg.solve(L, innovation)
                 quad_form = np.dot(v, v)
             except np.linalg.LinAlgError:
-                # Fallback to eigendecomposition
-                eigvals = np.linalg.eigvalsh(innovation_covariance)
-                eigvals = np.maximum(eigvals, self.regularization)
+                eigvals = np.maximum(
+                    np.linalg.eigvalsh(innovation_covariance), self.regularization
+                )
                 log_det = np.sum(np.log(eigvals))
-                quad_form = innovation @ self._inverse(innovation_covariance) @ innovation
-                
+                quad_form = (
+                    innovation @ self._inverse(innovation_covariance) @ innovation
+                )
         return -0.5 * (n * np.log(2 * np.pi) + log_det + quad_form)
-        
+
     def _predict_step(
-        self,
-        filtered_mean: NDArray,
-        filtered_covariance: NDArray,
+        self, filtered_mean: NDArray, filtered_covariance: NDArray
     ) -> Tuple[NDArray, NDArray]:
-        """Kalman filter prediction step.
-        
-        Computes:
-            α_{t|t-1} = T α_{t-1|t-1}
-            P_{t|t-1} = T P_{t-1|t-1} T' + R Q R'
-        """
-        # Predicted mean
+        """alpha_{t|t-1} = T alpha_{t-1|t-1};  P_{t|t-1} = T P_{t-1|t-1} T' + R Q R'."""
         predicted_mean = self._matrix_multiply(self.T, filtered_mean)
-        
-        # Predicted covariance
         if self.mode == "diagonal":
-            # T P T' + R Q R' simplifies for diagonal matrices
             predicted_cov = self.T**2 * filtered_covariance + self.R**2 * self.Q
         else:
             T_P = self._matrix_multiply(self.T, filtered_covariance)
@@ -364,90 +255,93 @@ class KalmanFilter:
             R_Q = self._matrix_multiply(self.R, self.Q)
             R_Q_R = self._matrix_multiply(R_Q, self._transpose(self.R))
             predicted_cov = self._add_matrices(T_P_T, R_Q_R)
-            
         return predicted_mean, predicted_cov
-        
+
     def _update_step(
         self,
         observation: NDArray,
         predicted_mean: NDArray,
         predicted_covariance: NDArray,
     ) -> FilteredState:
-        """Kalman filter update step.
-        
-        Computes:
-            v_t = y_t - Z α_{t|t-1}              (innovation)
-            F_t = Z P_{t|t-1} Z' + H             (innovation covariance)
-            K_t = P_{t|t-1} Z' F_t^{-1}          (Kalman gain)
-            α_{t|t} = α_{t|t-1} + K_t v_t        (filtered mean)
-            P_{t|t} = (I - K_t Z) P_{t|t-1}      (filtered covariance)
-        """
-        # Innovation
+        """v_t = y_t - Z a_{t|t-1};  F_t = Z P_{t|t-1} Z' + H;  K_t = P_{t|t-1} Z' F_t^-1;
+        a_{t|t} = a_{t|t-1} + K_t v_t;  P_{t|t} = (I - K_t Z) P_{t|t-1}."""
         innovation = observation - self._matrix_multiply(self.Z, predicted_mean)
-        
-        # Diagonal mode stays fully element-wise
+
         if self.mode == "diagonal":
             innovation_cov = self.Z**2 * predicted_covariance + self.H
-            kalman_gain = (predicted_covariance * self.Z) / (innovation_cov + self.regularization)
-            filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
+            kalman_gain = (predicted_covariance * self.Z) / (
+                innovation_cov + self.regularization
+            )
+            filtered_mean = predicted_mean + self._matrix_multiply(
+                kalman_gain, innovation
+            )
             filtered_cov = (1 - kalman_gain * self.Z) * predicted_covariance
-            ll = self._compute_log_likelihood(innovation, innovation_cov)
-            
             return FilteredState(
                 mean=filtered_mean,
                 covariance=filtered_cov,
                 predicted_mean=predicted_mean,
                 predicted_covariance=predicted_covariance,
                 kalman_gain=kalman_gain,
-                log_likelihood=ll,
+                log_likelihood=self._compute_log_likelihood(innovation, innovation_cov),
             )
-        
-        # Shared computations for dense/block modes
+
         Z_P = self._matrix_multiply(self.Z, predicted_covariance)
         Z_P_Z = self._matrix_multiply(Z_P, self._transpose(self.Z))
         innovation_cov = self._add_matrices(Z_P_Z, self.H)
         P_Z = self._matrix_multiply(predicted_covariance, self._transpose(self.Z))
-        
+
         if self.mode == "dense":
-            # Use Cholesky factorization once for both gain and likelihood
-            innovation_cov_reg = innovation_cov + self.regularization * np.eye(self.obs_dim)
+            innovation_cov_reg = innovation_cov + self.regularization * np.eye(
+                self.obs_dim
+            )
             try:
+                # one Cholesky factor serves both the gain (solve F K' = P_Z') and the likelihood
                 chol_factor, lower = cho_factor(
                     innovation_cov_reg, lower=False, check_finite=False
                 )
-                # Solve F K' = P_Z' instead of forming F^{-1}
-                kalman_gain = cho_solve((chol_factor, lower), P_Z.T, check_finite=False).T
-                
-                filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
-                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
+                kalman_gain = cho_solve(
+                    (chol_factor, lower), P_Z.T, check_finite=False
+                ).T
+                filtered_mean = predicted_mean + self._matrix_multiply(
+                    kalman_gain, innovation
+                )
+                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(
+                    kalman_gain, self.Z
+                )
                 filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
                 filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
-                
-                # Log-likelihood using the same Cholesky factor
+
                 log_det = 2.0 * np.sum(np.log(np.diag(chol_factor)))
                 whitened_innov = solve_triangular(
                     chol_factor, innovation, lower=lower, check_finite=False
                 )
-                quad_form = np.dot(whitened_innov, whitened_innov)
-                ll = -0.5 * (self.obs_dim * np.log(2 * np.pi) + log_det + quad_form)
+                ll = -0.5 * (
+                    self.obs_dim * np.log(2 * np.pi)
+                    + log_det
+                    + np.dot(whitened_innov, whitened_innov)
+                )
             except np.linalg.LinAlgError:
-                # Fallback to the more expensive inverse-based path
                 F_inv = self._inverse(innovation_cov)
                 kalman_gain = self._matrix_multiply(P_Z, F_inv)
-                filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
-                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
+                filtered_mean = predicted_mean + self._matrix_multiply(
+                    kalman_gain, innovation
+                )
+                I_KZ = np.eye(self.state_dim) - self._matrix_multiply(
+                    kalman_gain, self.Z
+                )
                 filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
                 filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
                 ll = self._compute_log_likelihood(innovation, innovation_cov)
         else:
-            # Block/sparse modes retain the existing solve strategy
             kalman_gain = self._matrix_multiply(P_Z, self._inverse(innovation_cov))
-            filtered_mean = predicted_mean + self._matrix_multiply(kalman_gain, innovation)
+            filtered_mean = predicted_mean + self._matrix_multiply(
+                kalman_gain, innovation
+            )
             I_KZ = np.eye(self.state_dim) - self._matrix_multiply(kalman_gain, self.Z)
             filtered_cov = self._matrix_multiply(I_KZ, predicted_covariance)
             filtered_cov = 0.5 * (filtered_cov + self._transpose(filtered_cov))
             ll = self._compute_log_likelihood(innovation, innovation_cov)
-        
+
         return FilteredState(
             mean=filtered_mean,
             covariance=filtered_cov,
@@ -456,60 +350,43 @@ class KalmanFilter:
             kalman_gain=kalman_gain,
             log_likelihood=ll,
         )
-        
+
     def filter(
-        self,
-        observations: NDArray,
-        missing_mask: Optional[NDArray] = None,
+        self, observations: NDArray, missing_mask: Optional[NDArray] = None
     ) -> FilterResult:
-        """Run Kalman filter on observation sequence.
-        
-        Parameters
-        ----------
-        observations : NDArray
-            Observation matrix, shape (T, obs_dim)
-        missing_mask : NDArray, optional
-            Boolean mask indicating missing values, shape (T, obs_dim)
-            
-        Returns
-        -------
-        FilterResult
-            Container with filtered states and log-likelihood
-        """
+        """Forward pass over observations, shape (T, obs_dim). missing_mask
+        (same shape, bool) skips the update step for missing rows, propagating
+        the prediction through unchanged."""
         if not self._initialized:
             raise RuntimeError("Filter not initialized. Call initialize() first.")
-            
+
         T_len = observations.shape[0]
-        
-        # Storage
         filtered_means = np.zeros((T_len, self.state_dim))
         predicted_means = np.zeros((T_len, self.state_dim))
-        
         if self.mode == "diagonal":
             filtered_covs = np.zeros((T_len, self.state_dim))
             predicted_covs = np.zeros((T_len, self.state_dim))
         elif self.mode == "block":
-            # Store sparse blocks as objects to avoid casting errors
-            filtered_covs = np.empty((T_len,), dtype=object)
+            filtered_covs = np.empty(
+                (T_len,), dtype=object
+            )  # sparse blocks, not castable to float array
             predicted_covs = np.empty((T_len,), dtype=object)
         else:
             filtered_covs = np.zeros((T_len, self.state_dim, self.state_dim))
             predicted_covs = np.zeros((T_len, self.state_dim, self.state_dim))
-            
+
         total_ll = 0.0
-        
-        # Initialize
         current_mean = self.initial_mean.copy()
-        current_cov = self.initial_covariance.copy() if self.mode != "diagonal" else self.initial_covariance.copy()
-        
+        current_cov = self.initial_covariance.copy()
+
         for t in range(T_len):
-            # Prediction step
             pred_mean, pred_cov = self._predict_step(current_mean, current_cov)
-            
-            # Handle missing observations
+
+            if self._time_varying_Z:
+                self.Z = self._Z_sequence[t]
+
             obs_t = observations[t]
             if missing_mask is not None and missing_mask[t].any():
-                # Skip update for missing observations
                 filtered_state = FilteredState(
                     mean=pred_mean,
                     covariance=pred_cov,
@@ -519,20 +396,17 @@ class KalmanFilter:
                     log_likelihood=0.0,
                 )
             else:
-                # Update step
                 filtered_state = self._update_step(obs_t, pred_mean, pred_cov)
-                
-            # Store results
+
             filtered_means[t] = filtered_state.mean
             filtered_covs[t] = filtered_state.covariance
             predicted_means[t] = filtered_state.predicted_mean
             predicted_covs[t] = filtered_state.predicted_covariance
             total_ll += filtered_state.log_likelihood
-            
-            # Update for next iteration
+
             current_mean = filtered_state.mean
             current_cov = filtered_state.covariance
-            
+
         return FilterResult(
             filtered_means=filtered_means,
             filtered_covariances=filtered_covs,

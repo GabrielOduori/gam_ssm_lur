@@ -1,5 +1,5 @@
 """
-Generic Spatiotemporal Data Loader for GAM-SSM-LUR.
+Spatiotemporal Data Loader for GAM-SSM-LUR.
 
 Defines a standard input contract that any city's data can satisfy:
 
@@ -16,7 +16,7 @@ Defines a standard input contract that any city's data can satisfy:
                          → used as spatially varying transition forcing W(s,t)
   grid.geojson         — polygon grid geometry (optional, for mapping)
 
-Dublin reference data maps onto this contract as:
+Current experiments reference data maps onto this contract as:
   dense_obs  → satellite_retreavals.csv  (TROPOMI column tropomi_no2)
   point_obs  → epa_timeseries.csv        (epa_no2)
   activity   → traffic_timeseries.csv    (traffic_volume)
@@ -25,7 +25,7 @@ Dublin reference data maps onto this contract as:
 Column names are fully configurable so any city's data can be loaded
 without modifying this class.
 
-References
+Key references for LUR modelling.
 ----------
 .. [1] Naughton, O., et al. (2018). A land use regression model for explaining
        spatial variation in air pollution. Science of the Total Environment.
@@ -36,13 +36,16 @@ References
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
-from numpy.linalg import lstsq
 import pandas as pd
+from numpy.linalg import lstsq
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +54,11 @@ logger = logging.getLogger(__name__)
 # Data containers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StaticData:
-    """Static (time-invariant) inputs for the GAM-LUR component.
+    """
+    Static (time-invariant) inputs for the GAM-LUR component.
 
     Attributes
     ----------
@@ -66,6 +71,7 @@ class StaticData:
     grid_ids : list of str
         Ordered list of grid cell identifiers.
     """
+
     features: pd.DataFrame
     target: pd.DataFrame
     grid_ids: List[str]
@@ -73,7 +79,8 @@ class StaticData:
 
 @dataclass
 class TemporalData:
-    """Time-varying inputs for the SSM component.
+    """
+    Time-varying inputs for the SSM component.
 
     Attributes
     ----------
@@ -92,6 +99,7 @@ class TemporalData:
     dates : list
         Sorted list of unique dates covered by the time series.
     """
+
     dense_obs: pd.DataFrame
     point_obs: pd.DataFrame
     activity_forcing: pd.DataFrame
@@ -101,7 +109,16 @@ class TemporalData:
 
 @dataclass
 class CalibrationResult:
-    """Coefficients from satellite-to-surface bias correction.
+    """
+    Coefficients from satellite-to-surface bias correction.
+    This is fitted via OLS on collocated satellite and station
+    observations as there is no direct method of converting satellite
+    data to surface equivalents.
+    Previlsly used a method followign Savenetas Mykakhail 2021 but this
+    methods isnt tested anywhere else and so was dropped off the pipeline.
+    The calibration is now done via OLS on collocated satellite and station
+    observations in consistence with existing practices.
+
 
     Attributes
     ----------
@@ -115,12 +132,19 @@ class CalibrationResult:
         Number of collocated station–satellite pairs used for fitting.
     r : float
         Pearson correlation of fit.
+    collocated : pd.DataFrame, optional
+        The station-satellite pairs (station_id, grid_id, date, obs_dense,
+        obs_value) the fit was computed on -- kept so the calibration scatter
+        figure can be plotted from the same data the pipeline actually used,
+        rather than a standalone script re-deriving it from raw CSVs.
     """
+
     beta0: float
     beta1: float
     sigma2_obs: float
     n_collocated: int
     r: float
+    collocated: Optional[pd.DataFrame] = None
 
     def apply(self, raw: np.ndarray) -> np.ndarray:
         """Apply calibration: raw satellite → surface-equivalent."""
@@ -131,8 +155,10 @@ class CalibrationResult:
 # Main loader
 # ---------------------------------------------------------------------------
 
+
 class SpatiotemporalDataset:
-    """Generic loader for spatiotemporal LUR datasets.
+    """
+    Loader for spatiotemporal LUR datasets.
 
     Reads a directory organised as::
 
@@ -147,7 +173,7 @@ class SpatiotemporalDataset:
           grid.geojson          (optional)
 
     All file names and column names are configurable so the same class works
-    for any city. Dublin defaults are provided for every parameter.
+    for any city. Current experimnents defaults are provided for every parameter.
 
     Parameters
     ----------
@@ -204,23 +230,6 @@ class SpatiotemporalDataset:
     grid_geojson : str, optional
         Path (relative to ``data_dir``) to grid GeoJSON. Default ``grid.geojson``.
 
-    Examples
-    --------
-    Load with Dublin defaults:
-
-    >>> ds = SpatiotemporalDataset("/path/to/lur_data")
-    >>> static = ds.load_static()
-    >>> temporal = ds.load_temporal()
-
-    Load with custom column names for a different city:
-
-    >>> ds = SpatiotemporalDataset(
-    ...     "/path/to/city_data",
-    ...     dense_obs_file="sentinel5p.csv",
-    ...     dense_obs_value_col="no2_molm2",
-    ...     activity_file="road_counts.csv",
-    ...     activity_value_col="vehicle_count",
-    ... )
     """
 
     def __init__(
@@ -252,11 +261,17 @@ class SpatiotemporalDataset:
         met_speed_prefix: str = "wind_sector_",
         met_freq_suffix: str = "_freq",
         met_speed_suffix: str = "_mean_speed",
+        # Overpass window: hours (inclusive) over which satellite, EPA, and
+        # traffic observations are averaged before entering the model.
+        overpass_window_start: int = 11,
+        overpass_window_end: int = 14,
         # Grid geometry
         grid_geojson: Optional[str] = "grid/grid.geojson",
     ):
         self.data_dir = Path(data_dir)
-        self.ts_dir = Path(time_series_dir) if time_series_dir else self.data_dir / "time_series"
+        self.ts_dir = (
+            Path(time_series_dir) if time_series_dir else self.data_dir / "time_series"
+        )
 
         self.features_file = features_file
         self.target_file = target_file
@@ -283,16 +298,18 @@ class SpatiotemporalDataset:
         self.met_freq_suffix = met_freq_suffix
         self.met_speed_suffix = met_speed_suffix
 
-        self._grid_geojson = (
-            self.data_dir / grid_geojson if grid_geojson else None
-        )
+        self.overpass_window_start = overpass_window_start
+        self.overpass_window_end = overpass_window_end
+
+        self._grid_geojson = self.data_dir / grid_geojson if grid_geojson else None
 
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
 
     def load_static(self) -> StaticData:
-        """Load features and target for the static GAM-LUR component.
+        """
+        Load features and target for the static GAM-LUR component.
 
         Returns
         -------
@@ -310,7 +327,12 @@ class SpatiotemporalDataset:
         return StaticData(features=features, target=target, grid_ids=grid_ids)
 
     def load_temporal(self) -> TemporalData:
-        """Load all time-varying data for the SSM component.
+        """
+        Load all time-varying data for the SSM component.
+
+        All time series (satellite, EPA, traffic) are averaged over the
+        overpass window [overpass_window_start, overpass_window_end] hours
+        (inclusive) rather than matched to a single overpass hour.
 
         Returns
         -------
@@ -348,7 +370,8 @@ class SpatiotemporalDataset:
         static: StaticData,
         min_collocated: int = 10,
     ) -> CalibrationResult:
-        """Calibrate dense observations against point observations via OLS.
+        """
+        Calibrate dense observations against point observations via OLS.
 
         Fits: ``point_obs = beta0 + beta1 * dense_obs`` at the grid cells
         that contain monitoring stations on days where both sources exist.
@@ -371,13 +394,9 @@ class SpatiotemporalDataset:
         CalibrationResult
             Fitted calibration coefficients and observation noise estimate.
         """
-        sta_grids = (
-            temporal.point_obs[["station_id", "grid_id"]]
-            .drop_duplicates()
-        )
+        sta_grids = temporal.point_obs[["station_id", "grid_id"]].drop_duplicates()
         merged = (
-            temporal.dense_obs
-            .merge(sta_grids, on="grid_id", how="inner")
+            temporal.dense_obs.merge(sta_grids, on="grid_id", how="inner")
             .merge(
                 temporal.point_obs[["station_id", "date", "obs_value"]],
                 on=["station_id", "date"],
@@ -391,11 +410,16 @@ class SpatiotemporalDataset:
             logger.warning(
                 "Only %d collocated obs for calibration (need %d). "
                 "Using identity calibration (beta0=0, beta1=1).",
-                n, min_collocated,
+                n,
+                min_collocated,
             )
             return CalibrationResult(
-                beta0=0.0, beta1=1.0, sigma2_obs=36.0,
-                n_collocated=n, r=float("nan"),
+                beta0=0.0,
+                beta1=1.0,
+                sigma2_obs=36.0,
+                n_collocated=n,
+                r=float("nan"),
+                collocated=merged,
             )
 
         X = np.column_stack([np.ones(n), merged["obs_dense"].values])
@@ -409,7 +433,11 @@ class SpatiotemporalDataset:
 
         logger.info(
             "Calibration: N=%d  surface = %.2f + %.2f × dense  r=%.3f  σ²=%.1f",
-            n, beta0, beta1, r, sigma2_obs,
+            n,
+            beta0,
+            beta1,
+            r,
+            sigma2_obs,
         )
         return CalibrationResult(
             beta0=round(beta0, 4),
@@ -417,10 +445,12 @@ class SpatiotemporalDataset:
             sigma2_obs=round(sigma2_obs, 2),
             n_collocated=n,
             r=round(r, 4),
+            collocated=merged,
         )
 
-    def load_grid_geometry(self) -> Optional["gpd.GeoDataFrame"]:
-        """Load polygon grid GeoJSON for spatial mapping.
+    def load_grid_geometry(self) -> Optional[gpd.GeoDataFrame]:
+        """
+        Load polygon grid GeoJSON for spatial mapping.
 
         Returns
         -------
@@ -432,6 +462,7 @@ class SpatiotemporalDataset:
             return None
         try:
             import geopandas as gpd
+
             gdf = gpd.read_file(self._grid_geojson)
             logger.info("Grid geometry loaded: %d polygons", len(gdf))
             return gdf
@@ -463,90 +494,129 @@ class SpatiotemporalDataset:
         return df
 
     def _load_dense_obs(self) -> pd.DataFrame:
-        """Load gridded observations, aggregate to daily, rename to standard cols."""
+        """
+        Load gridded satellite observations averaged over the overpass window.
+
+        All retrievals with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per (grid_id, date). This window mean is more
+        robust than single-hour matching and was recommended by thesis examiners.
+        """
         path = self.ts_dir / self.dense_obs_file
         logger.info("Loading dense observations from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(df[self.dense_obs_timestamp_col]).dt.date
+        ts = pd.to_datetime(df[self.dense_obs_timestamp_col]).dt.floor("h")
+        df["date"] = ts.dt.date
+        df["hour"] = ts.dt.hour
         df = df.dropna(subset=[self.dense_obs_value_col])
         df = df[df[self.dense_obs_value_col] > 0]
 
-        daily = (
-            df.groupby(["grid_id", "date"])[self.dense_obs_value_col]
-            .mean()
+        # Keep only observations within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        out = (
+            df.groupby(["grid_id", "date"])
+            .agg(obs_dense=(self.dense_obs_value_col, "mean"))
             .reset_index()
-            .rename(columns={self.dense_obs_value_col: "obs_dense"})
         )
         logger.info(
-            "Dense obs: %d rows, %d unique dates, %d grid cells",
-            len(daily),
-            daily["date"].nunique(),
-            daily["grid_id"].nunique(),
+            "Dense obs: %d rows, %d unique dates, %d grid cells "
+            "(window %02d:00–%02d:00)",
+            len(out),
+            out["date"].nunique(),
+            out["grid_id"].nunique(),
+            self.overpass_window_start,
+            self.overpass_window_end,
         )
-        return daily
+        return out
 
     def _load_point_obs(self) -> pd.DataFrame:
-        """Load station observations, aggregate to daily, rename to standard cols."""
+        """
+        Load station observations averaged over the overpass window.
+
+        Readings with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per (station_id, date). Consistent with the
+        dense-obs window mean so both inputs represent the same time-of-day.
+        """
         path = self.ts_dir / self.point_obs_file
         logger.info("Loading point observations from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(
-            df[self.point_obs_timestamp_col], utc=True, errors="coerce"
-        ).dt.date
-        df = df.dropna(subset=["date", self.point_obs_value_col])
+        ts = pd.to_datetime(df[self.point_obs_timestamp_col], utc=True, errors="coerce")
+        df["date"] = ts.dt.date
+        df["hour"] = ts.dt.hour
+        df = df.dropna(subset=["date", "hour", self.point_obs_value_col])
         df = df[df[self.point_obs_value_col] > 0]
 
-        daily = (
-            df.groupby([self.point_obs_station_col, "grid_id", "date"])[self.point_obs_value_col]
-            .mean()
+        # Keep only readings within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        out = (
+            df.groupby([self.point_obs_station_col, "grid_id", "date"])
+            .agg(obs_value=(self.point_obs_value_col, "mean"))
             .reset_index()
-            .rename(columns={
-                self.point_obs_station_col: "station_id",
-                self.point_obs_value_col: "obs_value",
-            })
+            .rename(columns={self.point_obs_station_col: "station_id"})
         )
         logger.info(
-            "Point obs: %d rows, %d stations",
-            len(daily),
-            daily["station_id"].nunique(),
+            "Point obs (window %02d:00–%02d:00 mean): %d rows, %d stations",
+            self.overpass_window_start,
+            self.overpass_window_end,
+            len(out),
+            out["station_id"].nunique(),
         )
-        return daily
+        return out
 
     def _load_activity_forcing(self) -> pd.DataFrame:
-        """Load activity time series and compute normalised daily anomaly.
+        """
+        Load traffic volume averaged over the overpass window per day.
 
-        Anomaly: Δ(t) = (daily_mean − period_mean) / period_mean
-        Positive Δ → above-average activity → positive forcing on pollutant.
+        Readings with hour in [overpass_window_start, overpass_window_end]
+        (inclusive) are averaged per date. Anomaly Δ(t) = (window_mean −
+        period_mean) / period_mean captures day-to-day traffic variation
+        during the satellite overpass window.
         """
         path = self.ts_dir / self.activity_file
         logger.info("Loading activity forcing from %s", path)
         df = pd.read_csv(path)
 
-        df["date"] = pd.to_datetime(
-            df[self.activity_timestamp_col], errors="coerce"
-        ).dt.date
-        df = df.dropna(subset=["date", self.activity_value_col])
+        ts = pd.to_datetime(df[self.activity_timestamp_col], errors="coerce")
+        df["date"] = ts.dt.date
+        df["hour"] = ts.dt.hour
+        df = df.dropna(subset=["date", "hour", self.activity_value_col])
 
-        daily = (
-            df.groupby("date")[self.activity_value_col]
-            .mean()
+        # Keep only readings within the overpass window
+        df = df[
+            (df["hour"] >= self.overpass_window_start)
+            & (df["hour"] <= self.overpass_window_end)
+        ]
+
+        hourly = (
+            df.groupby("date")
+            .agg(activity_mean=(self.activity_value_col, "mean"))
             .reset_index()
-            .rename(columns={self.activity_value_col: "activity_mean"})
         )
-        period_mean = daily["activity_mean"].mean()
-        daily["delta_activity"] = (
-            (daily["activity_mean"] - period_mean) / (period_mean + 1e-9)
+        period_mean = hourly["activity_mean"].mean()
+        hourly["delta_activity"] = (hourly["activity_mean"] - period_mean) / (
+            period_mean + 1e-9
         )
         logger.info(
-            "Activity forcing: %d days, period mean=%.1f",
-            len(daily), period_mean,
+            "Activity forcing (window %02d:00–%02d:00 mean): %d days, period mean=%.1f",
+            self.overpass_window_start,
+            self.overpass_window_end,
+            len(hourly),
+            period_mean,
         )
-        return daily[["date", "activity_mean", "delta_activity"]]
+        return hourly[["date", "activity_mean", "delta_activity"]]
 
     def _load_met_forcing(self) -> pd.DataFrame:
-        """Load meteorological forcing and compute per-cell scalar W(s,t).
+        """
+        Load meteorological forcing and compute per-cell scalar W(s,t).
 
         For wind data with sector structure:
           W(s,t) = Σ_k freq_k(s,t) × speed_k(s,t)
@@ -555,6 +625,7 @@ class SpatiotemporalDataset:
         giving a single scalar that represents how strongly wind is flushing
         each cell on each day. Any met forcing data with the same sector
         structure (freq + speed per sector) is supported.
+        Data already window averaged.
         """
         path = self.ts_dir / self.met_forcing_file
         logger.info("Loading meteorological forcing from %s", path)
@@ -583,7 +654,9 @@ class SpatiotemporalDataset:
 
         # Normalise frequencies to sum to 1 per row
         freq_sum = freq.sum(axis=1, keepdims=True)
-        freq_norm = np.where(freq_sum > 0, freq / (freq_sum + 1e-9), 1.0 / self.met_n_sectors)
+        freq_norm = np.where(
+            freq_sum > 0, freq / (freq_sum + 1e-9), 1.0 / self.met_n_sectors
+        )
 
         df["met_forcing"] = (freq_norm * speed).sum(axis=1)
 
@@ -591,13 +664,16 @@ class SpatiotemporalDataset:
             result = df[["grid_id", "date", "met_forcing"]]
             logger.info(
                 "Met forcing: %d rows, %d unique dates, %d grid cells",
-                len(result), result["date"].nunique(), result["grid_id"].nunique(),
+                len(result),
+                result["date"].nunique(),
+                result["grid_id"].nunique(),
             )
         else:
             result = df[["date", "met_forcing"]]
             logger.info(
                 "Met forcing (city-wide): %d rows, %d unique dates",
-                len(result), result["date"].nunique(),
+                len(result),
+                result["date"].nunique(),
             )
         return result
 
@@ -606,7 +682,9 @@ class SpatiotemporalDataset:
     # -----------------------------------------------------------------------
 
     def summary(self) -> str:
-        """Print a summary of what data is available in this dataset."""
+        """
+        Print a summary of what data is available in this dataset.
+        """
         lines = [
             "SpatiotemporalDataset",
             "=" * 50,

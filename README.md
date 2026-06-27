@@ -10,7 +10,7 @@ A Python framework for spatio-temporal air pollution modelling that integrates G
 Traditional Land Use Regression (LUR) models capture spatial heterogeneity in air pollution but treat temporal variation through model structure rather than as an explicit dynamical process. This package implements a hybrid framework that:
 
 1. **GAM Component**: Captures persistent spatial patterns through smooth functions of land use, road network, and traffic covariates
-2. **SSM Component**: Models temporal dynamics of residuals via Kalman filtering with Expectation-Maximisation parameter estimation
+2. **SSM Component**: Models temporal dynamics via Kalman filtering with Expectation-Maximisation parameter estimation. The GAM-regression coefficient (β) and external forcing coefficients (e.g. traffic anomaly, wind; B̃) are jointly estimated alongside the latent dynamics by an augmented-state EM, rather than pre-estimated by OLS and subtracted — avoiding silently discarding their estimation error into the dynamics (Harvey, 1989, Ch. 3.3).
 3. **Uncertainty Quantification**: Provides prediction intervals through posterior state distributions
 
 ## Model Architecture
@@ -34,11 +34,13 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 │                           ▼                                     │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │              SSM Temporal Component                      │   │
-│  │   Measurement: rₜ = Zαₜ + εₜ,  εₜ ~ N(0, H)             │   │
+│  │   Measurement: yₜ = Zαₜ + β·g̃ + B̃uₜ + εₜ,  εₜ ~ N(0, H) │   │
 │  │   Transition:  αₜ₊₁ = Tαₜ + Rηₜ,  ηₜ ~ N(0, Q)          │   │
+│  │   • β, B̃ are jointly-estimated fixed-effect states       │   │
+│  │     (identity transition, zero process noise)            │   │
 │  │   • Kalman filtering (forward pass)                      │   │
 │  │   • RTS smoothing (backward pass)                        │   │
-│  │   • EM parameter estimation                              │   │
+│  │   • Augmented-state EM parameter estimation               │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                           │                                     │
 │                           ▼                                     │
@@ -55,6 +57,23 @@ cd gam_ssm_lur
 pip install -e ".[dev]"
 ```
 
+## Development
+
+Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`:
+
+```bash
+pre-commit install   # one-time, after pip install -e ".[dev]"
+```
+
+After that, `git commit` automatically runs `ruff check --fix` and `ruff format` against staged files. To run manually:
+
+```bash
+ruff check src/ tests/        # lint
+ruff format src/ tests/       # format
+```
+
+Rule selection (`E`, `W`, `F`, `I`, `C`, `B` — pycodestyle, Pyflakes, isort, flake8-comprehensions, flake8-bugbear) and per-file exceptions (e.g. `E402` for the standalone scripts under `experiments/`/`scripts/` that bootstrap `sys.path` before importing the package) live in `pyproject.toml` under `[tool.ruff]`.
+
 ## Data Directory Structure
 
 ```
@@ -69,6 +88,21 @@ data/
     ├── traffic_timeseries.csv     # Daily traffic activity
     └── wind_sector_2023-06_daily.csv  # ERA5 wind sector data
 ```
+
+### Data Access
+
+The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI — always resolves to the latest version).
+
+You don't need to download this manually. If `data/` is missing any required file, `experiments/reproduce_paper.py` automatically fetches and extracts the archive on first run via `ensure_data_available()` in `src/gam_ssm_lur/fetch_data.py`. To trigger this fetch standalone:
+
+```python
+from pathlib import Path
+from gam_ssm_lur.fetch_data import ensure_data_available
+
+ensure_data_available(Path("data"))
+```
+
+The results reported in the paper were generated from version v3 of the dataset (DOI: [10.5281/zenodo.20793214](https://doi.org/10.5281/zenodo.20793214)); the concept DOI may point to a newer version by the time you read this.
 
 ## Reproducing Paper Results
 
@@ -122,15 +156,22 @@ All outputs are written to `experiments/results/run_YYYYMMDD_HHMMSS/`:
 
 **Figures (`figures/`):**
 - `static_lur_prior.png` — GAM spatial prediction surface
-- `ssm_selected_days.png` — SSM temporal snapshots (min / lower-tercile / upper-tercile / max pollution days)
+- `spatial_residuals.png` — signed and absolute GAM residuals
+- `residual_diagnostics.png` — 2×3 residual diagnostic panel
+- `em_convergence.png` — EM algorithm convergence trace
+- `ssm_selected_days.png` — SSM temporal snapshots (min / lower-tercile / upper-tercile / max pollution days, excluding the first/last calendar day — RTS smoother boundary estimates are least reliable there)
 - `ssm_daily_mean_barchart.png` — daily area-mean NO₂ bar chart with map days highlighted
-- `ssm_factors.png` — latent state factor time series
+- `station_timeseries.png` — per-station time series (GAM prior, SSM-corrected, observed)
 - `loocv_scatter.png` — leave-one-out cross-validation scatter
-- `gam_partial_response.png` — GAM partial dependence plots
-- `shap_summary.png` — SHAP beeswarm feature importance
-- `feature_importance.png` — Random Forest feature importances
+- `wind_sector_map.png` — GAM NO₂ map per dominant wind sector
+- `svd_scree.png` — SVD factor-selection diagnostic
+- `factor_heatmap.png` — latent SSM factor × day heatmap
+- `shap_summary.png` — SHAP beeswarm feature importance (exact closed-form additive Shapley values)
+- `moran_scatterplot.png` — Moran's I spatial autocorrelation of GAM residuals (if computed)
+- `tropomi_epa_calibration_scatter.png` — TROPOMI-EPA satellite-to-surface OLS calibration scatter
 - `reliability_diagram.png` — probabilistic calibration (reliability + sharpness + ISS)
-- `epa_vs_predicted_timeseries.png` — per-station and daily-mean time series
+- `epa_vs_predicted_timeseries.png` — per-station observed-vs-predicted time series
+- `epa_daily_mean_timeseries.png` — daily-mean observed-vs-predicted time series
 
 ### Scalability Modes
 

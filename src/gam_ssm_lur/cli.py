@@ -12,9 +12,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 
@@ -23,136 +21,176 @@ def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
 def train() -> None:
     """Train a hybrid GAM-SSM model."""
     parser = argparse.ArgumentParser(
-        description='Train a hybrid GAM-SSM model for air pollution prediction',
+        description="Train a hybrid GAM-SSM model for air pollution prediction",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # ── Data directory (standard contract) ───────────────────────────────────
     parser.add_argument(
-        '--data-dir', '-d',
+        "--data-dir",
+        "-d",
         type=str,
         required=True,
         help=(
-            'Root data directory containing features.csv, target.csv and a '
-            'time_series/ sub-directory with temporal data files.'
+            "Root data directory containing features.csv, target.csv and a "
+            "time_series/ sub-directory with temporal data files."
         ),
     )
 
     # ── Column / file name overrides (all have Dublin defaults) ──────────────
-    parser.add_argument('--target-col', default='atmos_no2',
-                        help='Target column name in target.csv')
-    parser.add_argument('--dense-obs-file', default='satellite_retreavals.csv',
-                        help='Dense gridded observation file (Kalman update source)')
-    parser.add_argument('--dense-obs-value-col', default='tropomi_no2',
-                        help='Value column in dense obs file')
-    parser.add_argument('--dense-obs-timestamp-col', default='timestamp',
-                        help='Timestamp column in dense obs file')
-    parser.add_argument('--point-obs-file', default='epa_timeseries.csv',
-                        help='Point observation file (validation only)')
-    parser.add_argument('--point-obs-value-col', default='epa_no2',
-                        help='Value column in point obs file')
-    parser.add_argument('--point-obs-timestamp-col', default='timestamp_utc',
-                        help='Timestamp column in point obs file')
-    parser.add_argument('--activity-file', default='traffic_timeseries.csv',
-                        help='Activity forcing file (city-wide transition covariate)')
-    parser.add_argument('--activity-value-col', default='traffic_volume',
-                        help='Volume column in activity file')
-    parser.add_argument('--activity-timestamp-col', default='traffic_end_time',
-                        help='Timestamp column in activity file')
-    parser.add_argument('--met-forcing-file',
-                        default='wind_sector_features_era5land_2023-06_daily.csv',
-                        help='Meteorological forcing file')
-    parser.add_argument('--met-n-sectors', type=int, default=8,
-                        help='Number of sectors in met forcing file')
-    parser.add_argument('--grid-geojson', default='grid.geojson',
-                        help='Grid polygon GeoJSON (relative to data-dir, optional)')
-    
+    parser.add_argument(
+        "--target-col", default="atmos_no2", help="Target column name in target.csv"
+    )
+    parser.add_argument(
+        "--dense-obs-file",
+        default="satellite_retreavals.csv",
+        help="Dense gridded observation file (Kalman update source)",
+    )
+    parser.add_argument(
+        "--dense-obs-value-col",
+        default="tropomi_no2",
+        help="Value column in dense obs file",
+    )
+    parser.add_argument(
+        "--dense-obs-timestamp-col",
+        default="timestamp",
+        help="Timestamp column in dense obs file",
+    )
+    parser.add_argument(
+        "--point-obs-file",
+        default="epa_timeseries.csv",
+        help="Point observation file (validation only)",
+    )
+    parser.add_argument(
+        "--point-obs-value-col",
+        default="epa_no2",
+        help="Value column in point obs file",
+    )
+    parser.add_argument(
+        "--point-obs-timestamp-col",
+        default="timestamp_utc",
+        help="Timestamp column in point obs file",
+    )
+    parser.add_argument(
+        "--activity-file",
+        default="traffic_timeseries.csv",
+        help="Activity forcing file (city-wide transition covariate)",
+    )
+    parser.add_argument(
+        "--activity-value-col",
+        default="traffic_volume",
+        help="Volume column in activity file",
+    )
+    parser.add_argument(
+        "--activity-timestamp-col",
+        default="traffic_end_time",
+        help="Timestamp column in activity file",
+    )
+    parser.add_argument(
+        "--met-forcing-file",
+        default="wind_sector_2023-06_daily.csv",
+        help="Meteorological forcing file",
+    )
+    parser.add_argument(
+        "--met-n-sectors",
+        type=int,
+        default=8,
+        help="Number of sectors in met forcing file",
+    )
+    parser.add_argument(
+        "--grid-geojson",
+        default="grid.geojson",
+        help="Grid polygon GeoJSON (relative to data-dir, optional)",
+    )
+
     # Model arguments
     parser.add_argument(
-        '--n-splines',
+        "--n-splines",
         type=int,
         default=10,
-        help='Number of splines for GAM',
+        help="Number of splines for GAM",
     )
     parser.add_argument(
-        '--em-max-iter',
+        "--em-max-iter",
         type=int,
         default=50,
-        help='Maximum EM iterations',
+        help="Maximum EM iterations",
     )
     parser.add_argument(
-        '--em-tol',
+        "--em-tol",
         type=float,
         default=1e-6,
-        help='EM convergence tolerance',
+        help="EM convergence tolerance",
     )
     parser.add_argument(
-        '--scalability-mode',
+        "--scalability-mode",
         type=str,
-        choices=['auto', 'dense', 'diagonal', 'block'],
-        default='auto',
-        help='Kalman filter scalability mode',
+        choices=["auto", "dense", "diagonal", "block"],
+        default="auto",
+        help="Kalman filter scalability mode",
     )
-    
+
     # Feature selection
     parser.add_argument(
-        '--corr-threshold',
+        "--corr-threshold",
         type=float,
         default=0.8,
-        help='Correlation threshold for feature selection',
+        help="Correlation threshold for feature selection",
     )
     parser.add_argument(
-        '--vif-threshold',
+        "--vif-threshold",
         type=float,
         default=10.0,
-        help='VIF threshold for feature selection',
+        help="VIF threshold for feature selection",
     )
     parser.add_argument(
-        '--n-features',
+        "--n-features",
         type=int,
         default=30,
-        help='Number of features to select',
+        help="Number of features to select",
     )
     parser.add_argument(
-        '--skip-feature-selection',
-        action='store_true',
-        help='Skip feature selection step',
+        "--skip-feature-selection",
+        action="store_true",
+        help="Skip feature selection step",
     )
-    
+
     # Output arguments
     parser.add_argument(
-        '--output', '-o',
+        "--output",
+        "-o",
         type=str,
         required=True,
-        help='Output directory for model and results',
+        help="Output directory for model and results",
     )
     parser.add_argument(
-        '--save-diagnostics',
-        action='store_true',
-        help='Save diagnostic plots',
+        "--save-diagnostics",
+        action="store_true",
+        help="Save diagnostic plots",
     )
-    
+
     # Other arguments
     parser.add_argument(
-        '--random-state',
+        "--random-state",
         type=int,
         default=None,
-        help='Random seed for reproducibility',
+        help="Random seed for reproducibility",
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Verbose output',
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Verbose output",
     )
-    
+
     args = parser.parse_args()
     setup_logging(args.verbose)
     logger = logging.getLogger(__name__)
@@ -160,9 +198,9 @@ def train() -> None:
     logger.info("Starting GAM-SSM training pipeline")
 
     # Import here to avoid slow imports for --help
-    from gam_ssm_lur import HybridGAMSSM, FeatureSelector, ModelEvaluator
+    from gam_ssm_lur import FeatureSelector, HybridGAMSSM, ModelEvaluator
     from gam_ssm_lur.data import SpatiotemporalDataset
-    from gam_ssm_lur.features import inverse_distance_transform, filter_sparse_cells
+    from gam_ssm_lur.features import filter_sparse_cells, inverse_distance_transform
 
     # ── Load data ─────────────────────────────────────────────────────────────
     ds = SpatiotemporalDataset(
@@ -208,7 +246,9 @@ def train() -> None:
         X_df, y_full = filter_sparse_cells(
             X_df.assign(**{c: features_df[c] for c in id_cols}),
             y_full,
-            min_nonzero_features=args.min_nonzero_features if hasattr(args, 'min_nonzero_features') else 1,
+            min_nonzero_features=args.min_nonzero_features
+            if hasattr(args, "min_nonzero_features")
+            else 1,
             id_cols=id_cols,
         )
         # Re-extract after filter
@@ -252,9 +292,7 @@ def train() -> None:
     evaluator = ModelEvaluator(model)
 
     if model._residual_matrix is not None:
-        ssm_pred = model.ssm_.predict()
         lur_pred = model.gam_.predict(model._X_train)
-        total_pred = lur_pred[:, np.newaxis] + ssm_pred.mean  # broadcast (n,) + (T,n)
 
         metrics = evaluator.compute_accuracy(
             model._y_train,
@@ -268,76 +306,82 @@ def train() -> None:
         evaluator.convergence_plot(save_path=output_dir / "convergence.png")
 
     logger.info("Training complete!")
-    
+
 
 def predict() -> None:
     """Generate predictions from a trained model."""
     parser = argparse.ArgumentParser(
-        description='Generate predictions from a trained GAM-SSM model',
+        description="Generate predictions from a trained GAM-SSM model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    
+
     parser.add_argument(
-        '--model', '-m',
+        "--model",
+        "-m",
         type=str,
         required=True,
-        help='Path to trained model directory',
+        help="Path to trained model directory",
     )
     parser.add_argument(
-        '--features', '-f',
+        "--features",
+        "-f",
         type=str,
         required=True,
-        help='Path to CSV file with features for prediction',
+        help="Path to CSV file with features for prediction",
     )
     parser.add_argument(
-        '--output', '-o',
+        "--output",
+        "-o",
         type=str,
         required=True,
-        help='Path for output predictions CSV',
+        help="Path for output predictions CSV",
     )
     parser.add_argument(
-        '--include-intervals',
-        action='store_true',
-        help='Include prediction intervals in output',
+        "--include-intervals",
+        action="store_true",
+        help="Include prediction intervals in output",
     )
     parser.add_argument(
-        '--confidence-level',
+        "--confidence-level",
         type=float,
         default=0.95,
-        help='Confidence level for prediction intervals',
+        help="Confidence level for prediction intervals",
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Verbose output',
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Verbose output",
     )
-    
+
     args = parser.parse_args()
     setup_logging(args.verbose)
     logger = logging.getLogger(__name__)
-    
+
     # Import here to avoid slow imports for --help
     from gam_ssm_lur import HybridGAMSSM
-    
+
     logger.info(f"Loading model from {args.model}")
     model = HybridGAMSSM.load(args.model)
-    
+
     logger.info(f"Loading features from {args.features}")
     features_df = pd.read_csv(args.features)
-    
+
     logger.info("Generating predictions...")
     predictions = model.predict(features_df)
-    
+
     # Build output dataframe
-    output_df = pd.DataFrame({
-        'prediction': predictions.total.flatten(),
-    })
-    
+    output_df = pd.DataFrame(
+        {
+            "prediction": predictions.total.flatten(),
+        }
+    )
+
     if args.include_intervals:
-        output_df['std'] = predictions.std.flatten()
-        output_df['lower'] = predictions.lower.flatten()
-        output_df['upper'] = predictions.upper.flatten()
-        
+        output_df["std"] = predictions.std.flatten()
+        output_df["lower"] = predictions.lower.flatten()
+        output_df["upper"] = predictions.upper.flatten()
+
     output_df.to_csv(args.output, index=False)
     logger.info(f"Predictions saved to {args.output}")
 
@@ -350,18 +394,18 @@ def main() -> None:
         print("  train    Train a hybrid GAM-SSM model")
         print("  predict  Generate predictions from a trained model")
         sys.exit(1)
-        
+
     command = sys.argv[1]
     sys.argv = sys.argv[1:]  # Remove command from argv
-    
-    if command == 'train':
+
+    if command == "train":
         train()
-    elif command == 'predict':
+    elif command == "predict":
         predict()
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

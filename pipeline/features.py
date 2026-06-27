@@ -1,4 +1,7 @@
-"""Step 2 — Feature engineering: clean, aggregate road totals, select/load features."""
+"""
+Step 2 — Feature engineering:
+clean, aggregate road totals, select/load features.
+"""
 
 from __future__ import annotations
 
@@ -43,37 +46,50 @@ def prepare_features(feat_df: pd.DataFrame, y_full, args, output_dir: Path):
     X_df = feat_df[feat_cols]
 
     # Drop non-numeric columns (e.g. geographic ID codes that leaked into features.csv)
-    non_numeric = [c for c in X_df.columns if not pd.api.types.is_numeric_dtype(X_df[c])]
+    non_numeric = [
+        c for c in X_df.columns if not pd.api.types.is_numeric_dtype(X_df[c])
+    ]
     if non_numeric:
-        logger.debug("Dropping %d non-numeric columns (geographic IDs / strings): %s",
-                     len(non_numeric), non_numeric)
+        logger.debug(
+            "Dropping %d non-numeric columns (geographic IDs / strings): %s",
+            len(non_numeric),
+            non_numeric,
+        )
         X_df = X_df.drop(columns=non_numeric)
 
     # Impute NaNs with column median
     nan_counts = X_df.isna().sum()
     if (nan_counts > 0).sum():
-        logger.info("Imputing NaN in %d feature columns (median fill)", (nan_counts > 0).sum())
+        logger.info(
+            "Imputing NaN in %d feature columns (median fill)", (nan_counts > 0).sum()
+        )
         X_df = X_df.fillna(X_df.median())
 
     # Aggregate sector-specific road_length columns into a single total per buffer.
     # The 8 directional (_s0–_s7) variants each carry ~1/8 of the road signal,
     # causing feature selection to drop all of them. Summing restores the full
     # road-proximity signal so high-NO2 corridors appear in spatial predictions.
-    road_buffers = sorted({
-        c.rsplit("_s", 1)[0]
-        for c in X_df.columns
-        if c.startswith("road_length_") and "_s" in c
-    })
+    road_buffers = sorted(
+        {
+            c.rsplit("_s", 1)[0]
+            for c in X_df.columns
+            if c.startswith("road_length_") and "_s" in c
+        }
+    )
     totals = {}
     for base in road_buffers:
-        sector_cols = [f"{base}_s{i}" for i in range(8) if f"{base}_s{i}" in X_df.columns]
+        sector_cols = [
+            f"{base}_s{i}" for i in range(8) if f"{base}_s{i}" in X_df.columns
+        ]
         if sector_cols:
             totals[f"{base}_total"] = X_df[sector_cols].sum(axis=1)
     if totals:
         X_df = pd.concat([X_df, pd.DataFrame(totals, index=X_df.index)], axis=1)
     n_road_totals = len(totals)
     logger.info("Added %d aggregated road_length_total columns", n_road_totals)
-    logger.info("After filtering: %d cells, %d raw features", len(X_df), len(X_df.columns))
+    logger.info(
+        "After filtering: %d cells, %d raw features", len(X_df), len(X_df.columns)
+    )
 
     selected_features_path = output_dir / "selected_features.txt"
     imp = None
@@ -93,24 +109,37 @@ def prepare_features(feat_df: pd.DataFrame, y_full, args, output_dir: Path):
     else:
         # Search both experiments/results/ (new) and results/ (legacy project root)
         project_root = Path(__file__).resolve().parent.parent
-        prev_runs = sorted([
-            *project_root.glob("experiments/results/run_*/selected_features.txt"),
-            *(project_root / "results").glob("run_*/selected_features.txt"),
-        ])
+        prev_runs = sorted(
+            [
+                *project_root.glob("experiments/results/run_*/selected_features.txt"),
+                *(project_root / "results").glob("run_*/selected_features.txt"),
+            ]
+        )
         if prev_runs:
             prev_path = prev_runs[-1]
             all_selected = prev_path.read_text().splitlines()
             selected = [f for f in all_selected if f in X_df.columns]
             missing = [f for f in all_selected if f not in X_df.columns]
             if missing:
-                logger.warning("Features in selected_features.txt not found in data: %s", missing)
+                logger.warning(
+                    "Features in selected_features.txt not found in data: %s", missing
+                )
             if selected:
                 X_df = X_df[selected]
-                logger.info("Loaded %d selected features from %s", len(selected), prev_path)
+                logger.info(
+                    "Loaded %d selected features from %s", len(selected), prev_path
+                )
             else:
-                logger.warning("No matching features found in %s — using all %d features", prev_path, len(X_df.columns))
+                logger.warning(
+                    "No matching features found in %s — using all %d features",
+                    prev_path,
+                    len(X_df.columns),
+                )
         else:
-            logger.warning("No selected_features.txt found — using all %d features (memory risk!)", len(X_df.columns))
+            logger.warning(
+                "No selected_features.txt found — using all %d features (memory risk!)",
+                len(X_df.columns),
+            )
 
     static_sel = StaticData(
         features=pd.concat(

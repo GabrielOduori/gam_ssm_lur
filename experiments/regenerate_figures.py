@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
-import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -47,13 +47,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DATA_DIR    = PROJECT_ROOT / "data"
+DATA_DIR = PROJECT_ROOT / "data"
 RESULTS_DIR = PROJECT_ROOT / "experiments" / "results"
 
 
 def latest_run(results_dir: Path) -> Path:
-    runs = sorted([d for d in results_dir.iterdir()
-                   if d.is_dir() and d.name.startswith("run_")])
+    runs = sorted(
+        [d for d in results_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]
+    )
     if not runs:
         raise FileNotFoundError(f"No run directories found in {results_dir}")
     return runs[-1]
@@ -65,25 +66,35 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--run-dir", type=Path,
-                       help="Path to a completed run directory")
-    group.add_argument("--latest", action="store_true",
-                       help="Use the most recent run in experiments/results/")
+    group.add_argument("--run-dir", type=Path, help="Path to a completed run directory")
+    group.add_argument(
+        "--latest",
+        action="store_true",
+        help="Use the most recent run in experiments/results/",
+    )
 
-    parser.add_argument("--data-dir", type=Path, default=DATA_DIR,
-                        help="Root data directory (needed for EPA time series and grid geometry)")
-    parser.add_argument("--fig-dir", type=Path, default=None,
-                        help="Output figures directory (default: <run-dir>/figures)")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=DATA_DIR,
+        help="Root data directory (needed for EPA time series and grid geometry)",
+    )
+    parser.add_argument(
+        "--fig-dir",
+        type=Path,
+        default=None,
+        help="Output figures directory (default: <run-dir>/figures)",
+    )
 
     # Data column names — must match the original run
-    parser.add_argument("--target-col",          default="atmos_no2")
-    parser.add_argument("--dense-obs-file",       default="satellite_retreavals.csv")
-    parser.add_argument("--dense-obs-value-col",  default="tropomi_no2")
-    parser.add_argument("--point-obs-file",       default="epa_timeseries.csv")
-    parser.add_argument("--point-obs-value-col",  default="epa_no2")
-    parser.add_argument("--activity-file",        default="traffic_timeseries.csv")
-    parser.add_argument("--activity-value-col",   default="traffic_volume")
-    parser.add_argument("--met-forcing-file",     default="wind_sector_2023-06_daily.csv")
+    parser.add_argument("--target-col", default="atmos_no2")
+    parser.add_argument("--dense-obs-file", default="satellite_retreavals.csv")
+    parser.add_argument("--dense-obs-value-col", default="tropomi_no2")
+    parser.add_argument("--point-obs-file", default="epa_timeseries.csv")
+    parser.add_argument("--point-obs-value-col", default="epa_no2")
+    parser.add_argument("--activity-file", default="traffic_timeseries.csv")
+    parser.add_argument("--activity-value-col", default="traffic_volume")
+    parser.add_argument("--met-forcing-file", default="wind_sector_2023-06_daily.csv")
 
     args = parser.parse_args()
 
@@ -123,15 +134,18 @@ def main() -> None:
 
     # ── 4. Reconstruct epa_eval ───────────────────────────────────────────────
     grid_id_to_idx = {gid: i for i, gid in enumerate(model.location_ids_)}
-    date_to_tidx   = {d: i for i, d in enumerate(model.time_ids_)}
+    date_to_tidx = {d: i for i, d in enumerate(model.time_ids_)}
 
     epa_eval = temporal.point_obs.copy()
     epa_eval["loc_idx"] = epa_eval["grid_id"].map(grid_id_to_idx)
-    epa_eval["t_idx"]   = epa_eval["date"].map(date_to_tidx)
+    epa_eval["t_idx"] = epa_eval["date"].map(date_to_tidx)
     epa_eval = epa_eval.dropna(subset=["loc_idx", "t_idx"])
     epa_eval[["loc_idx", "t_idx"]] = epa_eval[["loc_idx", "t_idx"]].astype(int)
-    logger.info("EPA eval: %d observation rows across %d stations",
-                len(epa_eval), epa_eval["station_id"].nunique())
+    logger.info(
+        "EPA eval: %d observation rows across %d stations",
+        len(epa_eval),
+        epa_eval["station_id"].nunique(),
+    )
 
     # ── 5. Load saved LOOCV results (if present) ──────────────────────────────
     loocv_path = run_dir / "loocv_results.csv"
@@ -156,17 +170,23 @@ def main() -> None:
     moran_path = run_dir / "moran_i.csv"
     if moran_path.exists():
         try:
-            from libpysal.weights import Queen
             from esda.moran import Moran
+            from libpysal.weights import Queen
+
             grid_gdf = ds.load_grid_geometry()
-            loc_gdf  = grid_gdf[grid_gdf["grid_id"].isin(model.location_ids_)].copy()
-            loc_gdf  = loc_gdf.set_index("grid_id").reindex(model.location_ids_).reset_index()
+            loc_gdf = grid_gdf[grid_gdf["grid_id"].isin(model.location_ids_)].copy()
+            loc_gdf = (
+                loc_gdf.set_index("grid_id").reindex(model.location_ids_).reset_index()
+            )
             moran_weights = Queen.from_dataframe(loc_gdf, silence_warnings=True)
             moran_weights.transform = "r"
             lur_res = model._y_train - model.gam_.predict(model._X_train)
             moran_result = Moran(lur_res, moran_weights, permutations=999)
-            logger.info("Moran's I reconstructed: I=%.4f  p=%.4f",
-                        moran_result.I, moran_result.p_sim)
+            logger.info(
+                "Moran's I reconstructed: I=%.4f  p=%.4f",
+                moran_result.I,
+                moran_result.p_sim,
+            )
         except ImportError:
             logger.warning("libpysal/esda not installed — Moran scatterplot skipped")
 
