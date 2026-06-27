@@ -7,9 +7,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import numpy as np
-from numpy.typing import NDArray
-
 
 class BaseEstimator(ABC):
     """Base class for all estimators in gam-ssm-lur.
@@ -90,7 +87,7 @@ class BaseEstimator(ABC):
 
         state = self._get_state_dict()
 
-        with open(filepath, 'wb') as f:
+        with open(filepath, "wb") as f:
             pickle.dump(state, f)
 
     @classmethod
@@ -117,7 +114,7 @@ class BaseEstimator(ABC):
         if not filepath.exists():
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             state = pickle.load(f)
 
         # Create instance and restore state
@@ -143,7 +140,7 @@ class BaseEstimator(ABC):
         """
         params = {}
         for key in self.__dict__:
-            if not key.endswith('_'):  # Skip fitted attributes
+            if not key.endswith("_"):  # Skip fitted attributes
                 params[key] = getattr(self, key)
         return params
 
@@ -268,13 +265,13 @@ class ModelSummary:
             Summary as dictionary
         """
         result = {
-            'r_squared': self.r_squared,
-            'rmse': self.rmse,
-            'mae': self.mae,
-            'aic': self.aic,
-            'bic': self.bic,
-            'n_params': self.n_params,
-            'n_obs': self.n_obs,
+            "r_squared": self.r_squared,
+            "rmse": self.rmse,
+            "mae": self.mae,
+            "aic": self.aic,
+            "bic": self.bic,
+            "n_params": self.n_params,
+            "n_obs": self.n_obs,
         }
         result.update(self.additional)
         return {k: v for k, v in result.items() if v is not None}
