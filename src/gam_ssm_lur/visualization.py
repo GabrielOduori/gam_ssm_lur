@@ -2194,14 +2194,15 @@ class DiagnosticsVisualizer:
     def plot_calibration_scatter(
         self,
         calibration,
-        title: str = "TROPOMI-EPA colocation calibration",
+        title: str = "TROPOMI–EPA colocation calibration",
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
-        """Satellite-to-surface OLS calibration scatter: EPA obs_value vs
-        TROPOMI obs_dense, with the fitted line and equation annotated.
+        """Satellite-to-surface OLS calibration scatter, styled to match the
+        original scripts/tropomi_epa_scatter.py: one marker shape per station,
+        TROPOMI VCD displayed scaled (x1e-4 mol/m^2), fit line + r^2/N equation.
 
-        Plots calibration.collocated (the exact station-satellite pairs
-        the pipeline's CalibrationResult was fit on, from
+        Plots calibration.collocated (the exact station-satellite pairs the
+        pipeline's CalibrationResult was fit on, from
         SpatiotemporalDataset.calibrate_dense_obs) -- not a re-derivation
         from raw CSVs, so this always matches what the model actually used.
 
@@ -2226,36 +2227,46 @@ class DiagnosticsVisualizer:
             _save(fig, save_path)
             return fig
 
-        x = merged["obs_dense"].values
+        SCALE = 1e4  # display TROPOMI as x10^-4 mol/m^2, matching the original script
+        x_raw = merged["obs_dense"].values
+        x_scaled = x_raw * SCALE
         y = merged["obs_value"].values
+        n = calibration.n_collocated
+        r2 = calibration.r**2
 
         fig, ax = plt.subplots(figsize=(6, 5))
-        for stn in sorted(merged["station_id"].unique()):
-            mask = merged["station_id"] == stn
+        markers = ["o", "x", "+", "s", "^", "D", "v", "P", "*"]
+        for i, stn in enumerate(sorted(merged["station_id"].unique())):
+            mask = merged["station_id"].values == stn
             ax.scatter(
-                x[mask],
+                x_scaled[mask],
                 y[mask],
                 label=stn,
-                s=35,
-                alpha=0.8,
+                marker=markers[i % len(markers)],
+                s=45,
+                alpha=0.85,
                 color="steelblue",
                 zorder=3,
             )
 
-        x_line = np.linspace(x.min(), x.max(), 200)
+        x_line_raw = np.linspace(x_raw.min(), x_raw.max(), 200)
         ax.plot(
-            x_line,
-            calibration.beta0 + calibration.beta1 * x_line,
+            x_line_raw * SCALE,
+            calibration.beta0 + calibration.beta1 * x_line_raw,
             color="black",
             lw=1.5,
             zorder=4,
             label="OLS fit",
         )
 
+        # beta1 was fit on raw (unscaled) obs_dense; convert to "per scaled
+        # unit" for display, matching the original script's own OLS on x_scaled
+        slope_scaled = calibration.beta1 / SCALE
         sign = "+" if calibration.beta0 >= 0 else "-"
         eq_text = (
-            f"$y = {calibration.beta1:.3f}x {sign} {abs(calibration.beta0):.3f}$\n"
-            f"$r = {calibration.r:.3f}$,  $N = {calibration.n_collocated}$"
+            f"$C_{{\\mathrm{{EPA}}}} = {slope_scaled:.2f}\\,C_{{\\mathrm{{TROP}}}} "
+            f"{sign} {abs(calibration.beta0):.2f}$\n"
+            f"$r^2 = {r2:.3f}$,  $N = {n}$"
         )
         ax.annotate(
             eq_text,
@@ -2265,13 +2276,21 @@ class DiagnosticsVisualizer:
             va="top",
             fontsize=9,
             fontweight="bold",
-            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "white",
+                "edgecolor": "grey",
+                "alpha": 0.85,
+            },
         )
 
-        ax.set_xlabel("TROPOMI dense obs (satellite)", fontsize=10)
-        ax.set_ylabel("EPA surface NO₂ (µg/m³)", fontsize=10)
+        ax.set_xlabel(
+            r"TROPOMI VCD, $C_{\mathrm{TROP}}$ ($\times 10^{-4}$ mol/m$^{2}$)",
+            fontsize=10,
+        )
+        ax.set_ylabel(r"EPA surface NO$_2$ ($\mu$g/m$^{3}$)", fontsize=10)
         ax.set_title(title, fontsize=11, fontweight="bold")
-        ax.legend(fontsize=7, ncol=2, loc="lower right", framealpha=0.85)
+        ax.legend(fontsize=7, ncol=2, loc="upper right", framealpha=0.85)
         ax.grid(True, linestyle="--", alpha=0.35)
 
         plt.tight_layout()
