@@ -9,7 +9,7 @@ exactly zero process noise -- i.e. fixed regression-effect states (Harvey,
 1989, Ch. 3.3) rather than latent dynamics. None means everything is dynamic,
 matching the original (pre-augmented-state) behaviour exactly.
 
-References
+Key references
 ----------
 .. [1] Dempster, A. P., Laird, N. M., & Rubin, D. B. (1977). Maximum likelihood
        from incomplete data via the EM algorithm. JRSS B, 39(1), 1-22.
