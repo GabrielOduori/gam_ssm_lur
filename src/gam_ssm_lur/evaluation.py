@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AccuracyMetrics:
-    """Container for accuracy metrics.
+    """
+    Container for accuracy metrics.
 
     Attributes
     ----------
@@ -64,7 +65,8 @@ class AccuracyMetrics:
 
 @dataclass
 class CalibrationMetrics:
-    """Container for uncertainty calibration metrics.
+    """
+    Container for uncertainty calibration metrics.
 
     Attributes
     ----------
@@ -86,7 +88,8 @@ class CalibrationMetrics:
 
 @dataclass
 class ResidualDiagnostics:
-    """Container for residual diagnostic results.
+    """
+    Container for residual diagnostic results.
 
     Attributes
     ----------
@@ -107,7 +110,8 @@ class ResidualDiagnostics:
 
 
 class ModelEvaluator:
-    """Comprehensive model evaluation and diagnostics.
+    """
+    Comprehensive model evaluation and diagnostics.
 
     Provides tools for assessing model performance including:
     - Accuracy metrics (RMSE, MAE, R².)
@@ -191,7 +195,8 @@ class ModelEvaluator:
         y_pred: NDArray,
         y_std: NDArray,
     ) -> CalibrationMetrics:
-        """Compute uncertainty calibration metrics.
+        """
+        Compute uncertainty calibration metrics.
 
         Parameters
         ----------
@@ -262,7 +267,8 @@ class ModelEvaluator:
         residuals: Optional[NDArray] = None,
         max_lag: int = 20,
     ) -> ResidualDiagnostics:
-        """Compute residual diagnostics.
+        """
+        Compute residual diagnostics.
 
         Parameters
         ----------
@@ -298,7 +304,8 @@ class ModelEvaluator:
         )
 
     def _compute_acf(self, x: NDArray, max_lag: int) -> NDArray:
-        """Compute autocorrelation function."""
+        """
+        Compute autocorrelation function."""
         n = len(x)
         mean = np.mean(x)
         var = np.var(x)
@@ -323,7 +330,8 @@ class ModelEvaluator:
         save_path: Optional[Union[str, Path]] = None,
         figsize: Tuple[int, int] = (12, 10),
     ) -> None:
-        """Generate diagnostic plots.
+        """
+        Generate diagnostic plots.
 
         Creates a 2x3 grid of diagnostic plots:
         1. Observed vs Predicted scatter
@@ -493,7 +501,8 @@ class ModelEvaluator:
         save_path: Optional[Union[str, Path]] = None,
         figsize: Tuple[int, int] = (12, 4),
     ) -> None:
-        """Plot EM algorithm convergence diagnostics.
+        """
+        Plot EM algorithm convergence diagnostics.
 
         Parameters
         ----------
@@ -776,7 +785,8 @@ class ModelEvaluator:
         obs_col: str = "epa_no2",
         grid_id_col: str = "grid_id",
     ) -> pd.DataFrame:
-        """Leave-one-station-out cross-validation of the GAM spatial component.
+        """
+        Leave-one-station-out cross-validation of the GAM spatial component.
 
         For each monitoring station the GAM is refitted on all spatial cells
         *except* the cell that contains the station.  The held-out cell is then
@@ -892,7 +902,8 @@ class ModelEvaluator:
         models: Dict[str, Tuple[NDArray, NDArray]],
         y_true: NDArray,
     ) -> pd.DataFrame:
-        """Compare multiple models.
+        """
+        Compare multiple models.
 
         Parameters
         ----------

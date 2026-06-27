@@ -1,4 +1,5 @@
-"""Automatic data fetching from Zenodo.
+"""
+Data fetching from Zenodo.
 
 If the local ``data/`` directory is missing required files, resolves the
 Zenodo concept DOI to whatever version is currently latest, downloads the
@@ -34,7 +35,9 @@ REQUIRED_FILES = (
 
 def _resolve_latest_record_id(concept_doi: str = ZENODO_CONCEPT_DOI) -> str:
     """Follow the concept DOI's redirect chain to the latest record ID."""
-    resp = requests.get(f"https://doi.org/{concept_doi}", allow_redirects=True, timeout=30)
+    resp = requests.get(
+        f"https://doi.org/{concept_doi}", allow_redirects=True, timeout=30
+    )
     resp.raise_for_status()
     record_id = resp.url.rstrip("/").rsplit("/", 1)[-1]
     logger.info("Resolved concept DOI %s -> latest record %s", concept_doi, record_id)
@@ -50,7 +53,8 @@ def ensure_data_available(
     concept_doi: str = ZENODO_CONCEPT_DOI,
     archive_name: str = "data.zip",
 ) -> None:
-    """Download and extract the dataset from Zenodo if any required file is missing.
+    """
+    Download and extract the dataset from Zenodo if any required file is missing.
 
     Parameters
     ----------
@@ -68,11 +72,15 @@ def ensure_data_available(
 
     logger.warning(
         "Missing %d required file(s) in %s: %s. Attempting download from Zenodo...",
-        len(missing), data_dir, missing,
+        len(missing),
+        data_dir,
+        missing,
     )
 
     record_id = _resolve_latest_record_id(concept_doi)
-    download_url = f"https://zenodo.org/api/records/{record_id}/files/{archive_name}/content"
+    download_url = (
+        f"https://zenodo.org/api/records/{record_id}/files/{archive_name}/content"
+    )
 
     extract_to = data_dir.parent
     extract_to.mkdir(parents=True, exist_ok=True)

@@ -41,7 +41,8 @@ def inverse_distance_transform(
     min_distance: float = 1.0,
     drop_raw: bool = False,
 ) -> pd.DataFrame:
-    """Transform raw distance columns to inverse-distance predictors.
+    """
+    Transform raw distance columns to inverse-distance predictors.
 
     Closer sources produce higher pollution, so 1/d is the physically
     appropriate predictor form. The squared term 1/d² additionally captures
@@ -128,14 +129,15 @@ def filter_sparse_cells(
     drop_zero_target: bool = True,
     id_cols: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, pd.Series]:
-    """Remove grid cells with insufficient predictor information.
+    """
+    Remove grid cells with insufficient predictor information.
 
     Inspired by the OpenLUR methodology (Lautenschlager et al., 2020), which
     restricts model training to cells with sufficient observed feature coverage.
     Cells with all-zero features contain no OSM or traffic information and
     would bias the model toward the intercept.
 
-    TODO: Might set this number to soecific figure in future..
+    TODO: Might set this number to specific figure in future..
     OpenLUR used a threshold of rows with min 200 predictors
 
     Parameters
@@ -162,10 +164,6 @@ def filter_sparse_cells(
         Filtered feature matrix.
     target_filtered : pd.Series
         Filtered target values.
-
-    Examples
-    --------
-    >>> X_clean, y_clean = filter_sparse_cells(X, y, min_nonzero_features=3)
     """
     if id_cols is None:
         id_cols = ["grid_id", "latitude", "longitude"]
@@ -206,7 +204,8 @@ def filter_sparse_cells(
 
 @dataclass
 class SelectionResult:
-    """Results from feature selection pipeline.
+    """
+    Results from feature selection pipeline.
 
     Attributes
     ----------
@@ -236,7 +235,8 @@ class SelectionResult:
 
 
 class FeatureSelector:
-    """Multi-stage feature selection pipeline for LUR models.
+    """
+    Multi-stage feature selection pipeline for LUR models.
 
     Reviewer had a question about how features were selected for the final model.
 
@@ -266,15 +266,6 @@ class FeatureSelector:
     random_state : int, optional
         Random seed for reproducibility
 
-    Examples
-    --------
-    >>> selector = FeatureSelector(
-    ...     correlation_threshold=0.8,
-    ...     vif_threshold=10.0,
-    ...     importance_threshold=0.95,
-    ... )
-    >>> X_selected = selector.fit_transform(X, y)
-    >>> print(f"Selected {selector.result_.n_selected} of {selector.result_.n_original} features")
     """
 
     def __init__(
@@ -301,7 +292,8 @@ class FeatureSelector:
         y: Union[NDArray, pd.Series],
         feature_names: Optional[List[str]] = None,
     ) -> FeatureSelector:
-        """Fit the feature selector.
+        """
+        Fit the feature selector.
 
         Parameters
         ----------
@@ -339,8 +331,17 @@ class FeatureSelector:
         dropped_imp: List[str] = []
 
         # Stage 1: Correlation-based removal
+        #
+        # current_features/dropped_corr are kept as lists ordered by the
+        # original feature_names, never a bare set -- set() iteration order
+        # for strings is hash-randomised per Python process (PYTHONHASHSEED),
+        # so list(some_set) silently gave a different column order on every
+        # run. That order then determined which feature among VIF ties got
+        # dropped first in Stage 2, cascading into a different *count* of
+        # selected features run-to-run (30-32 on identical data), not just
+        # different identities. to_remove itself is fine as a set: it's only
+        # ever used for membership testing (`in`), never iterated for order.
         logger.info("Stage 1: Correlation-based filtering")
-        current_features = set(feature_names)
         corr_matrix = X.corr().abs()
 
         to_remove = set()
@@ -364,15 +365,15 @@ class FeatureSelector:
                         else:
                             to_remove.add(col_j)
 
-        dropped_corr = list(to_remove)
-        current_features -= to_remove
+        dropped_corr = [f for f in feature_names if f in to_remove]
+        current_features = [f for f in feature_names if f not in to_remove]
         logger.info(
             f"  Removed {len(dropped_corr)} correlated features, {len(current_features)} remaining"
         )
 
         # Stage 2: VIF filtering
         logger.info("Stage 2: VIF filtering")
-        X_current = X[list(current_features)].copy()
+        X_current = X[current_features].copy()
 
         while True:
             vif_values = self._compute_vif(X_current)
@@ -403,21 +404,25 @@ class FeatureSelector:
             if len(X_current.columns) <= 5:  # safety floor
                 break
 
-        current_features = set(X_current.columns)
+        current_features = list(X_current.columns)  # order preserved through .drop()
         logger.info(
             f"  Removed {len(dropped_vif)} high-VIF features, {len(current_features)} remaining"
         )
 
-        # Re-add force-keep features if removed
+        # Re-add force-keep features if removed, preserving the original
+        # feature_names order rather than appending (which would make output
+        # order depend on force_keep's own set iteration order)
+        current_set = set(current_features)
         for feat in self.force_keep:
-            if feat in feature_names and feat not in current_features:
-                current_features.add(feat)
+            if feat in feature_names and feat not in current_set:
+                current_set.add(feat)
                 if feat in dropped_vif:
                     dropped_vif.remove(feat)
+        current_features = [f for f in feature_names if f in current_set]
 
         # Stage 3: Importance-based selection
         logger.info("Stage 3: Importance-based selection")
-        X_current = X[list(current_features)].copy()
+        X_current = X[current_features].copy()
 
         from sklearn.ensemble import RandomForestRegressor
 
@@ -450,10 +455,10 @@ class FeatureSelector:
         selected_by_threshold = set(importances.iloc[: cutoff_pos + 1]["feature"])
 
         # Always include force-keep features
-        top_features = selected_by_threshold | (self.force_keep & current_features)
+        top_features = selected_by_threshold | (self.force_keep & set(current_features))
 
         dropped_imp = [f for f in current_features if f not in top_features]
-        selected_features = list(top_features)
+        selected_features = [f for f in current_features if f in top_features]
 
         pct = (
             importances.loc[
@@ -489,7 +494,8 @@ class FeatureSelector:
         self,
         X: Union[NDArray, pd.DataFrame],
     ) -> pd.DataFrame:
-        """Transform features using fitted selector.
+        """
+        Transform features using fitted selector.
 
         Parameters
         ----------
@@ -520,7 +526,8 @@ class FeatureSelector:
         y: Union[NDArray, pd.Series],
         feature_names: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        """Fit selector and transform features.
+        """
+        Fit selector and transform features.
 
         Parameters
         ----------
@@ -567,7 +574,8 @@ class FeatureSelector:
         return vif
 
     def get_summary(self) -> str:
-        """Get human-readable summary of selection results."""
+        """
+        Get summary of selection results."""
         if not self._is_fitted:
             return "Selector not fitted."
 

@@ -191,6 +191,18 @@ def _save(fig: plt.Figure, path: Optional[Union[str, Path]], dpi: int = 150) -> 
         logger.info("Saved → %s", path)
 
 
+def _smooth(values: NDArray, window: int = 3) -> NDArray:
+    """Centered rolling mean (min_periods=1, so endpoints aren't dropped).
+
+    Purely a display aid for de-cluttering noisy daily time series plots --
+    raw values are still drawn separately as markers wherever this is used,
+    so nothing in the underlying data is hidden.
+    """
+    return (
+        pd.Series(values).rolling(window, center=True, min_periods=1).mean().to_numpy()
+    )
+
+
 def _annotate_r2(ax: plt.Axes, y_true: NDArray, y_pred: NDArray) -> None:
     """Add R² annotation in the lower-right corner of an axes."""
     ss_res = np.sum((y_true - y_pred) ** 2)
@@ -1247,8 +1259,16 @@ class TemporalVisualizer:
             obs = grp[obs_col].values
             ssm = grp[ssm_col].values
 
-            # Observed — dots connected by line
-            ax.plot(dates, obs, "b.-", ms=4, lw=1, label="Observed", zorder=4)
+            # Observed — raw daily values as markers, rolling mean as the readable line
+            ax.plot(dates, obs, "b.", ms=4, alpha=0.5, zorder=4)
+            ax.plot(
+                dates,
+                _smooth(obs),
+                "b-",
+                lw=1.3,
+                label="Observed (3-day mean)",
+                zorder=4,
+            )
 
             # 95% CI shading (behind the smoothed line)
             if uncertainty_col and uncertainty_col in grp.columns:
@@ -1355,8 +1375,15 @@ class TemporalVisualizer:
             )
             # Smoothed prediction
             ax.plot(grp[date_col], grp[pred_col], color=COL_SSM, lw=2, label="Smoothed")
-            # EPA observed — dots connected by line
-            ax.plot(grp[date_col], grp[obs_col], "b.-", ms=5, lw=1, label="Observed")
+            # EPA observed — raw daily values as markers, rolling mean as the readable line
+            ax.plot(grp[date_col], grp[obs_col], "b.", ms=5, alpha=0.5)
+            ax.plot(
+                grp[date_col],
+                _smooth(grp[obs_col].to_numpy()),
+                "b-",
+                lw=1.3,
+                label="Observed (3-day mean)",
+            )
 
             ax.set_title(sid, fontsize=9, fontweight="bold")
             ax.set_ylabel("NO₂ (µg/m³)", fontsize=8)
@@ -1403,13 +1430,13 @@ class TemporalVisualizer:
             lw=2,
             label="Smoothed mean",
         )
+        ax2.plot(daily[date_col], daily["obs_mean"], "b.", ms=6, alpha=0.5)
         ax2.plot(
             daily[date_col],
-            daily["obs_mean"],
-            "b.-",
-            ms=6,
-            lw=1.2,
-            label="Observed mean",
+            _smooth(daily["obs_mean"].to_numpy()),
+            "b-",
+            lw=1.5,
+            label="Observed mean (3-day)",
         )
         ax2.set_title("All stations — daily mean NO₂", fontsize=11, fontweight="bold")
         ax2.set_ylabel("NO₂ (µg/m³)", fontsize=9)
@@ -1449,14 +1476,13 @@ class TemporalVisualizer:
         highlighted = {pd.to_datetime(d) for d in (highlighted_dates or [])}
 
         fig, ax = plt.subplots(figsize=(10, 4), constrained_layout=True)
+        ax.plot(daily[date_col], daily[value_col], "o", color=COL_SSM, ms=5, alpha=0.5)
         ax.plot(
             daily[date_col],
-            daily[value_col],
+            _smooth(daily[value_col].to_numpy()),
             color=COL_SSM,
             lw=2,
-            marker="o",
-            ms=5,
-            label="Daily mean",
+            label="Daily mean (3-day)",
         )
 
         # Annotate highlighted bars
