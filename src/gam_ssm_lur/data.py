@@ -36,13 +36,16 @@ References
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
-from numpy.linalg import lstsq
 import pandas as pd
+from numpy.linalg import lstsq
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data containers
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class StaticData:
@@ -66,6 +70,7 @@ class StaticData:
     grid_ids : list of str
         Ordered list of grid cell identifiers.
     """
+
     features: pd.DataFrame
     target: pd.DataFrame
     grid_ids: List[str]
@@ -92,6 +97,7 @@ class TemporalData:
     dates : list
         Sorted list of unique dates covered by the time series.
     """
+
     dense_obs: pd.DataFrame
     point_obs: pd.DataFrame
     activity_forcing: pd.DataFrame
@@ -116,6 +122,7 @@ class CalibrationResult:
     r : float
         Pearson correlation of fit.
     """
+
     beta0: float
     beta1: float
     sigma2_obs: float
@@ -130,6 +137,7 @@ class CalibrationResult:
 # ---------------------------------------------------------------------------
 # Main loader
 # ---------------------------------------------------------------------------
+
 
 class SpatiotemporalDataset:
     """Generic loader for spatiotemporal LUR datasets.
@@ -260,7 +268,9 @@ class SpatiotemporalDataset:
         grid_geojson: Optional[str] = "grid/grid.geojson",
     ):
         self.data_dir = Path(data_dir)
-        self.ts_dir = Path(time_series_dir) if time_series_dir else self.data_dir / "time_series"
+        self.ts_dir = (
+            Path(time_series_dir) if time_series_dir else self.data_dir / "time_series"
+        )
 
         self.features_file = features_file
         self.target_file = target_file
@@ -288,11 +298,9 @@ class SpatiotemporalDataset:
         self.met_speed_suffix = met_speed_suffix
 
         self.overpass_window_start = overpass_window_start
-        self.overpass_window_end   = overpass_window_end
+        self.overpass_window_end = overpass_window_end
 
-        self._grid_geojson = (
-            self.data_dir / grid_geojson if grid_geojson else None
-        )
+        self._grid_geojson = self.data_dir / grid_geojson if grid_geojson else None
 
     # -----------------------------------------------------------------------
     # Public API
@@ -331,17 +339,19 @@ class SpatiotemporalDataset:
         """
         dense_obs = self._load_dense_obs()
         point_obs = self._load_point_obs()
-        activity  = self._load_activity_forcing()
-        met       = self._load_met_forcing()
+        activity = self._load_activity_forcing()
+        met = self._load_met_forcing()
 
         # Union of dates across dense obs and activity
-        dates_dense    = set(dense_obs["date"].unique()) if len(dense_obs) else set()
-        dates_activity = set(activity["date"].unique())  if len(activity)  else set()
+        dates_dense = set(dense_obs["date"].unique()) if len(dense_obs) else set()
+        dates_activity = set(activity["date"].unique()) if len(activity) else set()
         dates = sorted(dates_dense | dates_activity)
 
         logger.info(
             "Temporal data: %d dates, %d dense obs rows, %d station obs rows",
-            len(dates), len(dense_obs), len(point_obs),
+            len(dates),
+            len(dense_obs),
+            len(point_obs),
         )
         return TemporalData(
             dense_obs=dense_obs,
@@ -380,13 +390,9 @@ class SpatiotemporalDataset:
         CalibrationResult
             Fitted calibration coefficients and observation noise estimate.
         """
-        sta_grids = (
-            temporal.point_obs[["station_id", "grid_id"]]
-            .drop_duplicates()
-        )
+        sta_grids = temporal.point_obs[["station_id", "grid_id"]].drop_duplicates()
         merged = (
-            temporal.dense_obs
-            .merge(sta_grids, on="grid_id", how="inner")
+            temporal.dense_obs.merge(sta_grids, on="grid_id", how="inner")
             .merge(
                 temporal.point_obs[["station_id", "date", "obs_value"]],
                 on=["station_id", "date"],
@@ -400,11 +406,15 @@ class SpatiotemporalDataset:
             logger.warning(
                 "Only %d collocated obs for calibration (need %d). "
                 "Using identity calibration (beta0=0, beta1=1).",
-                n, min_collocated,
+                n,
+                min_collocated,
             )
             return CalibrationResult(
-                beta0=0.0, beta1=1.0, sigma2_obs=36.0,
-                n_collocated=n, r=float("nan"),
+                beta0=0.0,
+                beta1=1.0,
+                sigma2_obs=36.0,
+                n_collocated=n,
+                r=float("nan"),
             )
 
         X = np.column_stack([np.ones(n), merged["obs_dense"].values])
@@ -418,7 +428,11 @@ class SpatiotemporalDataset:
 
         logger.info(
             "Calibration: N=%d  surface = %.2f + %.2f × dense  r=%.3f  σ²=%.1f",
-            n, beta0, beta1, r, sigma2_obs,
+            n,
+            beta0,
+            beta1,
+            r,
+            sigma2_obs,
         )
         return CalibrationResult(
             beta0=round(beta0, 4),
@@ -428,7 +442,7 @@ class SpatiotemporalDataset:
             r=round(r, 4),
         )
 
-    def load_grid_geometry(self) -> Optional["gpd.GeoDataFrame"]:
+    def load_grid_geometry(self) -> Optional[gpd.GeoDataFrame]:
         """Load polygon grid GeoJSON for spatial mapping.
 
         Returns
@@ -441,6 +455,7 @@ class SpatiotemporalDataset:
             return None
         try:
             import geopandas as gpd
+
             gdf = gpd.read_file(self._grid_geojson)
             logger.info("Grid geometry loaded: %d polygons", len(gdf))
             return gdf
@@ -484,7 +499,7 @@ class SpatiotemporalDataset:
 
         ts = pd.to_datetime(df[self.dense_obs_timestamp_col]).dt.floor("h")
         df["date"] = ts.dt.date
-        df["hour"]  = ts.dt.hour
+        df["hour"] = ts.dt.hour
         df = df.dropna(subset=[self.dense_obs_value_col])
         df = df[df[self.dense_obs_value_col] > 0]
 
@@ -523,7 +538,7 @@ class SpatiotemporalDataset:
 
         ts = pd.to_datetime(df[self.point_obs_timestamp_col], utc=True, errors="coerce")
         df["date"] = ts.dt.date
-        df["hour"]  = ts.dt.hour
+        df["hour"] = ts.dt.hour
         df = df.dropna(subset=["date", "hour", self.point_obs_value_col])
         df = df[df[self.point_obs_value_col] > 0]
 
@@ -577,8 +592,8 @@ class SpatiotemporalDataset:
             .reset_index()
         )
         period_mean = hourly["activity_mean"].mean()
-        hourly["delta_activity"] = (
-            (hourly["activity_mean"] - period_mean) / (period_mean + 1e-9)
+        hourly["delta_activity"] = (hourly["activity_mean"] - period_mean) / (
+            period_mean + 1e-9
         )
         logger.info(
             "Activity forcing (window %02d:00–%02d:00 mean): %d days, period mean=%.1f",
@@ -627,7 +642,9 @@ class SpatiotemporalDataset:
 
         # Normalise frequencies to sum to 1 per row
         freq_sum = freq.sum(axis=1, keepdims=True)
-        freq_norm = np.where(freq_sum > 0, freq / (freq_sum + 1e-9), 1.0 / self.met_n_sectors)
+        freq_norm = np.where(
+            freq_sum > 0, freq / (freq_sum + 1e-9), 1.0 / self.met_n_sectors
+        )
 
         df["met_forcing"] = (freq_norm * speed).sum(axis=1)
 
@@ -635,13 +652,16 @@ class SpatiotemporalDataset:
             result = df[["grid_id", "date", "met_forcing"]]
             logger.info(
                 "Met forcing: %d rows, %d unique dates, %d grid cells",
-                len(result), result["date"].nunique(), result["grid_id"].nunique(),
+                len(result),
+                result["date"].nunique(),
+                result["grid_id"].nunique(),
             )
         else:
             result = df[["date", "met_forcing"]]
             logger.info(
                 "Met forcing (city-wide): %d rows, %d unique dates",
-                len(result), result["date"].nunique(),
+                len(result),
+                result["date"].nunique(),
             )
         return result
 

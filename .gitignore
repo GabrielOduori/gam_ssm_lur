@@ -241,3 +241,4 @@ presentations_talks/
 talks/
 # Local OSM tile cache (not for git)
 outputs/osm_cache/
+_deprecated/

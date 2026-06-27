@@ -18,33 +18,38 @@ __author__ = "Gabriel Oduori"
 __email__ = "gabriel.oduori@ucd.ie"
 
 # Core models and base classes
-from gam_ssm_lur.models import (
-    HybridGAMSSM,
-    SpatialGAM,
-    StateSpaceModel,
-    BaseEstimator,
-    ModelSummary,
+from gam_ssm_lur import utils
+from gam_ssm_lur.data import (
+    CalibrationResult,
+    SpatiotemporalDataset,
+    StaticData,
+    TemporalData,
 )
-
-# Inference algorithms
-from gam_ssm_lur.inference import KalmanFilter, RTSSmoother, EMEstimator
+from gam_ssm_lur.evaluation import ModelEvaluator
 
 # Utilities
 from gam_ssm_lur.features import (
     FeatureSelector,
-    inverse_distance_transform,
     filter_sparse_cells,
+    inverse_distance_transform,
 )
-from gam_ssm_lur.data import SpatiotemporalDataset, StaticData, TemporalData, CalibrationResult
-from gam_ssm_lur.evaluation import ModelEvaluator
+
+# Inference algorithms
+from gam_ssm_lur.inference import EMEstimator, KalmanFilter, RTSSmoother
+from gam_ssm_lur.models import (
+    BaseEstimator,
+    HybridGAMSSM,
+    ModelSummary,
+    SpatialGAM,
+    StateSpaceModel,
+)
 from gam_ssm_lur.visualization import (
+    DiagnosticsVisualizer,
+    ModelComparisonVisualizer,
     SpatialVisualizer,
     TemporalVisualizer,
-    ModelComparisonVisualizer,
-    DiagnosticsVisualizer,
     create_publication_figure_set,
 )
-from gam_ssm_lur import utils
 
 __all__ = [
     # Main model

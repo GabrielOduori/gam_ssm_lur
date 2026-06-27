@@ -7,7 +7,6 @@ Watson & Engle, 1983).
 """
 
 import numpy as np
-import pytest
 
 from gam_ssm_lur.models.state_space import StateSpaceModel
 
@@ -41,7 +40,7 @@ class TestStateSpaceModelAugmented:
         recovers them through the public API (not just the underlying EM unit).
         """
         np.random.seed(7)
-        k = 2          # score/state dimension
+        k = 2  # score/state dimension
         T_len = 350
         true_T = np.array([[0.75, 0.0], [0.0, 0.6]])
         true_Q = np.diag([0.03, 0.02])
@@ -52,10 +51,12 @@ class TestStateSpaceModelAugmented:
         g_tilde = np.array([0.6, -0.3])  # fixed, known GAM-projection regressor
 
         n_forcing = 2
-        forcing = np.column_stack([
-            0.5 + 0.5 * np.sin(np.linspace(0, 8 * np.pi, T_len)),
-            0.5 + 0.5 * np.cos(np.linspace(0, 5 * np.pi, T_len)),
-        ])
+        forcing = np.column_stack(
+            [
+                0.5 + 0.5 * np.sin(np.linspace(0, 8 * np.pi, T_len)),
+                0.5 + 0.5 * np.cos(np.linspace(0, 5 * np.pi, T_len)),
+            ]
+        )
 
         alpha = np.zeros((T_len, k))
         for t in range(1, T_len):
@@ -64,17 +65,18 @@ class TestStateSpaceModelAugmented:
 
         obs_noise = np.random.multivariate_normal(np.zeros(k), true_H, size=T_len)
         scores = (
-            alpha
-            + true_beta * g_tilde[np.newaxis, :]
-            + forcing @ true_B.T
-            + obs_noise
+            alpha + true_beta * g_tilde[np.newaxis, :] + forcing @ true_B.T + obs_noise
         )
 
         ssm = StateSpaceModel(state_dim=k, em_max_iter=80, em_tol=1e-7, random_state=0)
         ssm.fit(scores, forcing_matrix=forcing, g_tilde=g_tilde)
 
         assert ssm.is_fitted_
-        assert ssm.Z_.shape == (T_len, k, k + 1 + k * n_forcing)  # time-varying, augmented
+        assert ssm.Z_.shape == (
+            T_len,
+            k,
+            k + 1 + k * n_forcing,
+        )  # time-varying, augmented
 
         # Jointly estimated regression effects close to truth.
         assert ssm.beta_ is not None
@@ -88,7 +90,9 @@ class TestStateSpaceModelAugmented:
         # Static block of T/Q must be exactly identity/zero (never perturbed).
         aug_dim = ssm.T_.shape[0]
         np.testing.assert_allclose(ssm.T_[k:, k:], np.eye(aug_dim - k))
-        np.testing.assert_allclose(ssm.Q_[k:, k:], np.zeros((aug_dim - k, aug_dim - k)), atol=1e-10)
+        np.testing.assert_allclose(
+            ssm.Q_[k:, k:], np.zeros((aug_dim - k, aug_dim - k)), atol=1e-10
+        )
 
         # predict() returns only the alpha-block (k,), not the full augmented state.
         pred = ssm.predict()
@@ -105,7 +109,11 @@ class TestStateSpaceModelAugmented:
         alpha = np.zeros((T_len, k))
         for t in range(1, T_len):
             alpha[t] = 0.5 * alpha[t - 1] + np.random.normal(0, 0.1, k)
-        scores = alpha + true_beta * g_tilde[np.newaxis, :] + np.random.normal(0, 0.1, (T_len, k))
+        scores = (
+            alpha
+            + true_beta * g_tilde[np.newaxis, :]
+            + np.random.normal(0, 0.1, (T_len, k))
+        )
 
         ssm = StateSpaceModel(state_dim=k, em_max_iter=60, em_tol=1e-7, random_state=1)
         ssm.fit(scores, g_tilde=g_tilde)

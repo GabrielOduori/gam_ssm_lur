@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple, Union, List
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -92,7 +92,7 @@ def compute_prediction_intervals(
 
 def extract_diagonal(
     cov: NDArray,
-    return_format: str = 'vector',
+    return_format: str = "vector",
 ) -> NDArray:
     """Extract diagonal elements from covariance matrix/matrices.
 
@@ -114,19 +114,19 @@ def extract_diagonal(
     """
     if cov.ndim == 1:
         # Already a diagonal vector
-        if return_format == 'matrix':
+        if return_format == "matrix":
             return np.diag(cov)
         return cov
     elif cov.ndim == 2:
         # Single covariance matrix
         diag = np.diag(cov)
-        if return_format == 'matrix':
+        if return_format == "matrix":
             return np.diag(diag)
         return diag
     elif cov.ndim == 3:
         # Sequence of covariance matrices
         diag = np.diagonal(cov, axis1=1, axis2=2)
-        if return_format == 'matrix':
+        if return_format == "matrix":
             # Convert to diagonal matrices
             n_steps, n_dim = diag.shape
             result = np.zeros_like(cov)

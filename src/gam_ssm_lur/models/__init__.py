@@ -11,8 +11,12 @@ This module contains the main model implementations:
 
 from gam_ssm_lur.models.base import BaseEstimator, ModelSummary
 from gam_ssm_lur.models.hybrid import HybridGAMSSM
-from gam_ssm_lur.models.spatial_gam import SpatialGAM, GAMSummary
-from gam_ssm_lur.models.state_space import StateSpaceModel, SSMPrediction, SSMDiagnostics
+from gam_ssm_lur.models.spatial_gam import GAMSummary, SpatialGAM
+from gam_ssm_lur.models.state_space import (
+    SSMDiagnostics,
+    SSMPrediction,
+    StateSpaceModel,
+)
 
 __all__ = [
     "BaseEstimator",

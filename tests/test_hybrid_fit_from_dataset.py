@@ -14,10 +14,9 @@ own spatial pattern. Jointly estimating beta should eliminate this.
 
 import numpy as np
 import pandas as pd
-import pytest
 
-from gam_ssm_lur.models.hybrid import HybridGAMSSM
 from gam_ssm_lur.data import StaticData, TemporalData
+from gam_ssm_lur.models.hybrid import HybridGAMSSM
 
 
 def _build_synthetic_dataset(n_cells=60, n_times=30, true_beta=0.4, seed=0):
@@ -28,17 +27,26 @@ def _build_synthetic_dataset(n_cells=60, n_times=30, true_beta=0.4, seed=0):
 
     feat1 = rng.uniform(0, 1, n_cells)
     feat2 = rng.uniform(0, 1, n_cells)
-    features = pd.DataFrame({
-        "grid_id": grid_ids, "latitude": lat, "longitude": lon,
-        "feat1": feat1, "feat2": feat2,
-    })
+    features = pd.DataFrame(
+        {
+            "grid_id": grid_ids,
+            "latitude": lat,
+            "longitude": lon,
+            "feat1": feat1,
+            "feat2": feat2,
+        }
+    )
 
     # Smooth, learnable target so the GAM recovers a clear spatial pattern.
     target_vals = 10 + 8 * feat1 - 5 * feat2 + rng.normal(0, 0.2, n_cells)
-    target = pd.DataFrame({
-        "grid_id": grid_ids, "latitude": lat, "longitude": lon,
-        "atmos_no2": target_vals,
-    })
+    target = pd.DataFrame(
+        {
+            "grid_id": grid_ids,
+            "latitude": lat,
+            "longitude": lon,
+            "atmos_no2": target_vals,
+        }
+    )
     static = StaticData(features=features, target=target, grid_ids=grid_ids)
 
     dates = pd.date_range("2023-06-01", periods=n_times, freq="D").date.tolist()
@@ -66,23 +74,34 @@ def _build_synthetic_dataset(n_cells=60, n_times=30, true_beta=0.4, seed=0):
             dense_rows.append({"grid_id": gid, "date": d, "obs_dense": obs[i]})
     dense_obs = pd.DataFrame(dense_rows)
 
-    point_obs = pd.DataFrame({
-        "station_id": [], "grid_id": [], "date": [], "obs_value": [],
-    })
+    point_obs = pd.DataFrame(
+        {
+            "station_id": [],
+            "grid_id": [],
+            "date": [],
+            "obs_value": [],
+        }
+    )
 
-    activity_forcing = pd.DataFrame({
-        "date": dates,
-        "activity_mean": rng.normal(100, 10, n_times),
-        "delta_activity": rng.normal(0, 0.1, n_times),
-    })
-    met_forcing = pd.DataFrame({
-        "date": dates,
-        "met_forcing": rng.normal(0, 1, n_times),
-    })
+    activity_forcing = pd.DataFrame(
+        {
+            "date": dates,
+            "activity_mean": rng.normal(100, 10, n_times),
+            "delta_activity": rng.normal(0, 0.1, n_times),
+        }
+    )
+    met_forcing = pd.DataFrame(
+        {
+            "date": dates,
+            "met_forcing": rng.normal(0, 1, n_times),
+        }
+    )
 
     temporal = TemporalData(
-        dense_obs=dense_obs, point_obs=point_obs,
-        activity_forcing=activity_forcing, met_forcing=met_forcing,
+        dense_obs=dense_obs,
+        point_obs=point_obs,
+        activity_forcing=activity_forcing,
+        met_forcing=met_forcing,
         dates=dates,
     )
     return static, temporal, target_vals, true_loading, true_beta
@@ -92,8 +111,11 @@ class TestFitFromDataset:
     def test_runs_end_to_end_and_produces_finite_predictions(self):
         static, temporal, _, _, _ = _build_synthetic_dataset()
         model = HybridGAMSSM(
-            state_dim=2, n_splines=4, em_max_iter=30,
-            scalability_mode="dense", random_state=0,
+            state_dim=2,
+            n_splines=4,
+            em_max_iter=30,
+            scalability_mode="dense",
+            random_state=0,
         )
         model.fit_from_dataset(static, temporal, calibration=None)
 
@@ -109,8 +131,11 @@ class TestFitFromDataset:
     def test_beta_recovered_reasonably_close_to_truth(self):
         static, temporal, _, _, true_beta = _build_synthetic_dataset(true_beta=0.4)
         model = HybridGAMSSM(
-            state_dim=2, n_splines=4, em_max_iter=40,
-            scalability_mode="dense", random_state=0,
+            state_dim=2,
+            n_splines=4,
+            em_max_iter=40,
+            scalability_mode="dense",
+            random_state=0,
         )
         model.fit_from_dataset(static, temporal, calibration=None)
 
@@ -129,11 +154,15 @@ class TestFitFromDataset:
         own spatial pattern. Jointly estimating beta should not.
         """
         static, temporal, target_vals, _, _ = _build_synthetic_dataset(
-            true_beta=0.3, seed=2,
+            true_beta=0.3,
+            seed=2,
         )
         model = HybridGAMSSM(
-            state_dim=2, n_splines=4, em_max_iter=40,
-            scalability_mode="dense", random_state=0,
+            state_dim=2,
+            n_splines=4,
+            em_max_iter=40,
+            scalability_mode="dense",
+            random_state=0,
         )
         model.fit_from_dataset(static, temporal, calibration=None)
 

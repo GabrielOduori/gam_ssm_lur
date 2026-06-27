@@ -7,12 +7,12 @@ This module contains algorithms for parameter estimation and state inference:
 - EMEstimator: Expectation-Maximization algorithm for parameter learning
 """
 
+from gam_ssm_lur.inference.em import EMEstimator, EMResult
 from gam_ssm_lur.inference.kalman import (
-    KalmanFilter,
     FilterResult,
+    KalmanFilter,
 )
 from gam_ssm_lur.inference.smoother import RTSSmoother, SmootherResult
-from gam_ssm_lur.inference.em import EMEstimator, EMResult
 
 __all__ = [
     "KalmanFilter",
