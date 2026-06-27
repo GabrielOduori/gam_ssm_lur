@@ -8,10 +8,11 @@ Output: experiments/results/study_area_map.png
 """
 
 import os
-import pandas as pd
+
+import contextily as ctx
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import contextily as ctx
+import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from pyproj import Transformer
@@ -20,15 +21,21 @@ os.chdir("/media/gabriel-oduori/SERVER/dev_space/gam_ssm_lur")
 
 # ── Station data ──────────────────────────────────────────────
 MODEL_STATIONS = [
-    "EPA-11","EPA-17","EPA-22","EPA-29","EPA-49",
-    "EPA-50","EPA-57","EPA-69","EPA-76",
+    "EPA-11",
+    "EPA-17",
+    "EPA-22",
+    "EPA-29",
+    "EPA-49",
+    "EPA-50",
+    "EPA-57",
+    "EPA-69",
+    "EPA-76",
 ]
 
 epa = pd.read_csv("data/time_series/epa_timeseries.csv")
-epa_pts = (
-    epa[epa["station_id"].isin(MODEL_STATIONS)]
-    .drop_duplicates("station_id")[["station_id", "latitude", "longitude"]]
-)
+epa_pts = epa[epa["station_id"].isin(MODEL_STATIONS)].drop_duplicates("station_id")[
+    ["station_id", "latitude", "longitude"]
+]
 
 scats = pd.read_csv("data/time_series/traffic_timeseries.csv")
 scats_pts = scats.drop_duplicates("site_id")[["site_id", "latitude", "longitude"]]
@@ -78,9 +85,14 @@ for _, row in epa_gdf.iterrows():
 
 # Study area extent box
 extent_rect = Rectangle(
-    (xmin, ymin), xmax - xmin, ymax - ymin,
-    linewidth=2, edgecolor="black", facecolor="none",
-    linestyle="--", zorder=4,
+    (xmin, ymin),
+    xmax - xmin,
+    ymax - ymin,
+    linewidth=2,
+    edgecolor="black",
+    facecolor="none",
+    linestyle="--",
+    zorder=4,
 )
 ax.add_patch(extent_rect)
 
@@ -88,8 +100,7 @@ ax.set_xlim(xmin - 300, xmax + 300)
 ax.set_ylim(ymin - 300, ymax + 300)
 
 # Basemap
-ctx.add_basemap(ax, source=ctx.providers.CartoDB.Voyager, zoom=13,
-                attribution=False)
+ctx.add_basemap(ax, source=ctx.providers.CartoDB.Voyager, zoom=13, attribution=False)
 
 # Degree tick labels (convert Web Mercator ticks back to WGS84)
 tf_inv = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
@@ -103,8 +114,15 @@ ax.set_yticks(ytick_wm)
 ax.set_yticklabels([f"{lat:.2f}°" for lat in lat_ticks], fontsize=8)
 
 # Attribution
-ax.text(0.01, 0.01, "© OpenStreetMap contributors © CARTO",
-        transform=ax.transAxes, fontsize=5, color="grey", va="bottom")
+ax.text(
+    0.01,
+    0.01,
+    "© OpenStreetMap contributors © CARTO",
+    transform=ax.transAxes,
+    fontsize=5,
+    color="grey",
+    va="bottom",
+)
 
 # ── Inset: Ireland overview ───────────────────────────────────
 axins = ax.inset_axes([0.70, 0.02, 0.27, 0.27])
@@ -116,13 +134,17 @@ xins_max, yins_max = tf.transform(LON_INS_MAX, LAT_INS_MAX)
 
 axins.set_xlim(xins_min, xins_max)
 axins.set_ylim(yins_min, yins_max)
-ctx.add_basemap(axins, source=ctx.providers.CartoDB.Voyager, zoom=6,
-                attribution=False)
+ctx.add_basemap(axins, source=ctx.providers.CartoDB.Voyager, zoom=6, attribution=False)
 
 # Study area bounding box on inset
 study_box = Rectangle(
-    (xmin, ymin), xmax - xmin, ymax - ymin,
-    linewidth=2, edgecolor="#DC143C", facecolor="none", zorder=5,
+    (xmin, ymin),
+    xmax - xmin,
+    ymax - ymin,
+    linewidth=2,
+    edgecolor="#DC143C",
+    facecolor="none",
+    zorder=5,
 )
 axins.add_patch(study_box)
 
@@ -134,38 +156,75 @@ for spine in axins.spines.values():
 
 # ── Legend ────────────────────────────────────────────────────
 n_scats = len(scats_gdf)
-n_epa   = len(epa_gdf)
+n_epa = len(epa_gdf)
 legend_elements = [
-    Line2D([0],[0], marker="o", color="w", markerfacecolor="steelblue",
-           markersize=7, alpha=0.7, label=f"SCATS detector (n={n_scats})"),
-    Line2D([0],[0], marker="^", color="w", markerfacecolor="#DC143C",
-           markersize=9, label=f"EPA station (n={n_epa})"),
-    Line2D([0],[0], color="black", linewidth=1.5, linestyle="--",
-           label="Study area extent"),
+    Line2D(
+        [0],
+        [0],
+        marker="o",
+        color="w",
+        markerfacecolor="steelblue",
+        markersize=7,
+        alpha=0.7,
+        label=f"SCATS detector (n={n_scats})",
+    ),
+    Line2D(
+        [0],
+        [0],
+        marker="^",
+        color="w",
+        markerfacecolor="#DC143C",
+        markersize=9,
+        label=f"EPA station (n={n_epa})",
+    ),
+    Line2D(
+        [0],
+        [0],
+        color="black",
+        linewidth=1.5,
+        linestyle="--",
+        label="Study area extent",
+    ),
 ]
 # ── Shared horizontal centre for scale bar / arrow / legend ───
 cx = 0.14  # axes fraction — centre of the cluster
 
 # ── Legend (bottom) ───────────────────────────────────────────
-ax.legend(handles=legend_elements, loc="lower center",
-          bbox_to_anchor=(cx, 0.02), borderaxespad=0,
-          fontsize=8, framealpha=0.9, edgecolor="grey")
+ax.legend(
+    handles=legend_elements,
+    loc="lower center",
+    bbox_to_anchor=(cx, 0.02),
+    borderaxespad=0,
+    fontsize=8,
+    framealpha=0.9,
+    edgecolor="grey",
+)
 
 # ── Scale bar (~5 km) above legend ────────────────────────────
 scale_m = 5000
 total_x = (xmax + 300) - (xmin - 300)
 scale_frac = scale_m / total_x
-ax.plot([cx - scale_frac / 2, cx + scale_frac / 2], [0.155, 0.155],
-        "k-", lw=2.5, zorder=6, transform=ax.transAxes)
-ax.text(cx, 0.140, "5 km", ha="center", fontsize=7,
-        zorder=6, transform=ax.transAxes)
+ax.plot(
+    [cx - scale_frac / 2, cx + scale_frac / 2],
+    [0.155, 0.155],
+    "k-",
+    lw=2.5,
+    zorder=6,
+    transform=ax.transAxes,
+)
+ax.text(cx, 0.140, "5 km", ha="center", fontsize=7, zorder=6, transform=ax.transAxes)
 
 # ── North arrow above scale bar ───────────────────────────────
-ax.annotate("", xy=(cx, 0.22), xytext=(cx, 0.175),
-            xycoords="axes fraction",
-            arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
-ax.text(cx, 0.235, "N", ha="center", fontsize=9, fontweight="bold",
-        transform=ax.transAxes)
+ax.annotate(
+    "",
+    xy=(cx, 0.22),
+    xytext=(cx, 0.175),
+    xycoords="axes fraction",
+    arrowprops={"arrowstyle": "->", "color": "black", "lw": 1.5},
+)
+ax.text(
+    cx, 0.235, "N", ha="center", fontsize=9, fontweight="bold", transform=ax.transAxes
+)
 
 ax.set_xlabel("Longitude", fontsize=10)
 ax.set_ylabel("Latitude", fontsize=10)
