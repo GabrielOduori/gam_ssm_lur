@@ -5,3 +5,10 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: no-ai-attribution
+        name: Reject AI attribution in commit message
+        entry: scripts/check_no_ai_attribution.sh
+        language: script
+        stages: [commit-msg]
