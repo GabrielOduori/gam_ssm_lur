@@ -123,6 +123,7 @@ class HybridGAMSSM:
         # variance of calibration residuals (satellite vs surface EPA) -- the
         # measurement representativeness error when predicting surface NO2
         self._sigma2_obs: float = 0.0
+        self._calibration = None  # CalibrationResult, set by fit_from_dataset()
 
         # optional spatially-resolved traffic correction (T, n_locations),
         # calibrated against EPA residuals (traffic_field.calibrate_traffic_field).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Reproduce Paper Results: GAM-SSM-LUR for Prediction.
+Reproduces Paper Results: GAM-SSM-LUR for Prediction.
 
 Runs the full pipeline using SpatiotemporalDataset → fit_from_dataset()
 against the data directory structure.

@@ -157,6 +157,15 @@ def generate_figures(
             save_path=fig_dir / "moran_scatterplot.png",
         )
 
+    # TROPOMI-EPA satellite-to-surface calibration scatter (the OLS fit
+    # actually used by the model, via model._calibration, not a re-derivation)
+    if model._calibration is not None:
+        dv = DiagnosticsVisualizer()
+        dv.plot_calibration_scatter(
+            model._calibration,
+            save_path=fig_dir / "tropomi_epa_calibration_scatter.png",
+        )
+
     # Probabilistic calibration — reliability diagram + sharpness + ISS
     y_obs = epa_eval["obs_value"].values
     y_pred = hybrid_pred.total[epa_eval["t_idx"].values, epa_eval["loc_idx"].values]

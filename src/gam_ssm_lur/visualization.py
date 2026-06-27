@@ -1548,13 +1548,15 @@ class ModelComparisonVisualizer:
     ) -> plt.Figure:
         """Leave-one-station-out cross-validation scatter.
 
-        Each station is plotted in a distinct colour.  An OLS regression line
+        Each station is plotted in a distinct colour. An OLS regression line
         and the 1:1 line are overlaid, with CV R² and Pearson r in the title.
 
         Parameters
         ----------
         cv_df : pd.DataFrame
-            One row per (station, date) with observed and LOOCV-predicted NO2.
+            One row per held-out station (n_stations rows total) with the
+            period-mean observed and LOOCV-predicted NO2 for that station.
+            This is a spatial-generalisation check, not a per-day comparison.
         """
         y_obs = cv_df[obs_col].values
         y_pred = cv_df[pred_col].values
@@ -1580,8 +1582,18 @@ class ModelComparisonVisualizer:
                 color=colour,
                 edgecolor="white",
                 linewidth=0.5,
-                label=sid,
             )
+            # Direct labels: with only n_stations points, a station-colour
+            # legend forces the reader to cross-reference; a direct label
+            # makes outliers identifiable at a glance.
+            for _, row in grp.iterrows():
+                ax.annotate(
+                    sid,
+                    (row[pred_col], row[obs_col]),
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                    fontsize=7,
+                )
 
         ax.plot(
             x_line,
@@ -1601,7 +1613,6 @@ class ModelComparisonVisualizer:
 
         ax.set_xlabel("LOOCV Predicted NO₂ (µg/m³)")
         ax.set_ylabel("Measured NO₂ (µg/m³)")
-        _annotate_r2(ax, y_obs, y_pred)
 
         t = title or f"LOOCV: Modelled vs Measured  (CV R²={cv_r2:.3f}, r={r_val:.3f})"
         ax.set_title(t, fontsize=10, fontweight="bold")
@@ -2176,6 +2187,93 @@ class DiagnosticsVisualizer:
         )
 
         fig.suptitle(title, fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save(fig, save_path)
+        return fig
+
+    def plot_calibration_scatter(
+        self,
+        calibration,
+        title: str = "TROPOMI-EPA colocation calibration",
+        save_path: Optional[Union[str, Path]] = None,
+    ) -> plt.Figure:
+        """Satellite-to-surface OLS calibration scatter: EPA obs_value vs
+        TROPOMI obs_dense, with the fitted line and equation annotated.
+
+        Plots calibration.collocated (the exact station-satellite pairs
+        the pipeline's CalibrationResult was fit on, from
+        SpatiotemporalDataset.calibrate_dense_obs) -- not a re-derivation
+        from raw CSVs, so this always matches what the model actually used.
+
+        Parameters
+        ----------
+        calibration : CalibrationResult
+            Output of calibrate_dense_obs(), with collocated populated.
+        save_path : str or Path, optional
+        """
+        merged = calibration.collocated
+        if merged is None or len(merged) == 0:
+            fig, ax = plt.subplots(figsize=(6, 5))
+            ax.text(
+                0.5,
+                0.5,
+                "No collocated calibration data available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                color="grey",
+            )
+            _save(fig, save_path)
+            return fig
+
+        x = merged["obs_dense"].values
+        y = merged["obs_value"].values
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        for stn in sorted(merged["station_id"].unique()):
+            mask = merged["station_id"] == stn
+            ax.scatter(
+                x[mask],
+                y[mask],
+                label=stn,
+                s=35,
+                alpha=0.8,
+                color="steelblue",
+                zorder=3,
+            )
+
+        x_line = np.linspace(x.min(), x.max(), 200)
+        ax.plot(
+            x_line,
+            calibration.beta0 + calibration.beta1 * x_line,
+            color="black",
+            lw=1.5,
+            zorder=4,
+            label="OLS fit",
+        )
+
+        sign = "+" if calibration.beta0 >= 0 else "-"
+        eq_text = (
+            f"$y = {calibration.beta1:.3f}x {sign} {abs(calibration.beta0):.3f}$\n"
+            f"$r = {calibration.r:.3f}$,  $N = {calibration.n_collocated}$"
+        )
+        ax.annotate(
+            eq_text,
+            xy=(0.04, 0.96),
+            xycoords="axes fraction",
+            ha="left",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+        )
+
+        ax.set_xlabel("TROPOMI dense obs (satellite)", fontsize=10)
+        ax.set_ylabel("EPA surface NO₂ (µg/m³)", fontsize=10)
+        ax.set_title(title, fontsize=11, fontweight="bold")
+        ax.legend(fontsize=7, ncol=2, loc="lower right", framealpha=0.85)
+        ax.grid(True, linestyle="--", alpha=0.35)
+
         plt.tight_layout()
         _save(fig, save_path)
         return fig

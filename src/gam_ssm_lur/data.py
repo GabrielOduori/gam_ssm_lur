@@ -1,5 +1,5 @@
 """
-Generic Spatiotemporal Data Loader for GAM-SSM-LUR.
+Spatiotemporal Data Loader for GAM-SSM-LUR.
 
 Defines a standard input contract that any city's data can satisfy:
 
@@ -16,7 +16,7 @@ Defines a standard input contract that any city's data can satisfy:
                          → used as spatially varying transition forcing W(s,t)
   grid.geojson         — polygon grid geometry (optional, for mapping)
 
-Dublin reference data maps onto this contract as:
+Current experiments reference data maps onto this contract as:
   dense_obs  → satellite_retreavals.csv  (TROPOMI column tropomi_no2)
   point_obs  → epa_timeseries.csv        (epa_no2)
   activity   → traffic_timeseries.csv    (traffic_volume)
@@ -25,7 +25,7 @@ Dublin reference data maps onto this contract as:
 Column names are fully configurable so any city's data can be loaded
 without modifying this class.
 
-References
+Key references for LUR modelling.
 ----------
 .. [1] Naughton, O., et al. (2018). A land use regression model for explaining
        spatial variation in air pollution. Science of the Total Environment.
@@ -57,7 +57,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StaticData:
-    """Static (time-invariant) inputs for the GAM-LUR component.
+    """
+    Static (time-invariant) inputs for the GAM-LUR component.
 
     Attributes
     ----------
@@ -78,7 +79,8 @@ class StaticData:
 
 @dataclass
 class TemporalData:
-    """Time-varying inputs for the SSM component.
+    """
+    Time-varying inputs for the SSM component.
 
     Attributes
     ----------
@@ -107,7 +109,16 @@ class TemporalData:
 
 @dataclass
 class CalibrationResult:
-    """Coefficients from satellite-to-surface bias correction.
+    """
+    Coefficients from satellite-to-surface bias correction.
+    This is fitted via OLS on collocated satellite and station
+    observations as there is no direct method of converting satellite
+    data to surface equivalents.
+    Previlsly used a method followign Savenetas Mykakhail 2021 but this
+    methods isnt tested anywhere else and so was dropped off the pipeline.
+    The calibration is now done via OLS on collocated satellite and station
+    observations in consistence with existing practices.
+
 
     Attributes
     ----------
@@ -121,6 +132,11 @@ class CalibrationResult:
         Number of collocated station–satellite pairs used for fitting.
     r : float
         Pearson correlation of fit.
+    collocated : pd.DataFrame, optional
+        The station-satellite pairs (station_id, grid_id, date, obs_dense,
+        obs_value) the fit was computed on -- kept so the calibration scatter
+        figure can be plotted from the same data the pipeline actually used,
+        rather than a standalone script re-deriving it from raw CSVs.
     """
 
     beta0: float
@@ -128,6 +144,7 @@ class CalibrationResult:
     sigma2_obs: float
     n_collocated: int
     r: float
+    collocated: Optional[pd.DataFrame] = None
 
     def apply(self, raw: np.ndarray) -> np.ndarray:
         """Apply calibration: raw satellite → surface-equivalent."""
@@ -140,7 +157,8 @@ class CalibrationResult:
 
 
 class SpatiotemporalDataset:
-    """Generic loader for spatiotemporal LUR datasets.
+    """
+    Loader for spatiotemporal LUR datasets.
 
     Reads a directory organised as::
 
@@ -155,7 +173,7 @@ class SpatiotemporalDataset:
           grid.geojson          (optional)
 
     All file names and column names are configurable so the same class works
-    for any city. Dublin defaults are provided for every parameter.
+    for any city. Current experimnents defaults are provided for every parameter.
 
     Parameters
     ----------
@@ -212,23 +230,6 @@ class SpatiotemporalDataset:
     grid_geojson : str, optional
         Path (relative to ``data_dir``) to grid GeoJSON. Default ``grid.geojson``.
 
-    Examples
-    --------
-    Load with Dublin defaults:
-
-    >>> ds = SpatiotemporalDataset("/path/to/lur_data")
-    >>> static = ds.load_static()
-    >>> temporal = ds.load_temporal()
-
-    Load with custom column names for a different city:
-
-    >>> ds = SpatiotemporalDataset(
-    ...     "/path/to/city_data",
-    ...     dense_obs_file="sentinel5p.csv",
-    ...     dense_obs_value_col="no2_molm2",
-    ...     activity_file="road_counts.csv",
-    ...     activity_value_col="vehicle_count",
-    ... )
     """
 
     def __init__(
@@ -307,7 +308,8 @@ class SpatiotemporalDataset:
     # -----------------------------------------------------------------------
 
     def load_static(self) -> StaticData:
-        """Load features and target for the static GAM-LUR component.
+        """
+        Load features and target for the static GAM-LUR component.
 
         Returns
         -------
@@ -325,7 +327,8 @@ class SpatiotemporalDataset:
         return StaticData(features=features, target=target, grid_ids=grid_ids)
 
     def load_temporal(self) -> TemporalData:
-        """Load all time-varying data for the SSM component.
+        """
+        Load all time-varying data for the SSM component.
 
         All time series (satellite, EPA, traffic) are averaged over the
         overpass window [overpass_window_start, overpass_window_end] hours
@@ -367,7 +370,8 @@ class SpatiotemporalDataset:
         static: StaticData,
         min_collocated: int = 10,
     ) -> CalibrationResult:
-        """Calibrate dense observations against point observations via OLS.
+        """
+        Calibrate dense observations against point observations via OLS.
 
         Fits: ``point_obs = beta0 + beta1 * dense_obs`` at the grid cells
         that contain monitoring stations on days where both sources exist.
@@ -415,6 +419,7 @@ class SpatiotemporalDataset:
                 sigma2_obs=36.0,
                 n_collocated=n,
                 r=float("nan"),
+                collocated=merged,
             )
 
         X = np.column_stack([np.ones(n), merged["obs_dense"].values])
@@ -440,10 +445,12 @@ class SpatiotemporalDataset:
             sigma2_obs=round(sigma2_obs, 2),
             n_collocated=n,
             r=round(r, 4),
+            collocated=merged,
         )
 
     def load_grid_geometry(self) -> Optional[gpd.GeoDataFrame]:
-        """Load polygon grid GeoJSON for spatial mapping.
+        """
+        Load polygon grid GeoJSON for spatial mapping.
 
         Returns
         -------
@@ -487,7 +494,8 @@ class SpatiotemporalDataset:
         return df
 
     def _load_dense_obs(self) -> pd.DataFrame:
-        """Load gridded satellite observations averaged over the overpass window.
+        """
+        Load gridded satellite observations averaged over the overpass window.
 
         All retrievals with hour in [overpass_window_start, overpass_window_end]
         (inclusive) are averaged per (grid_id, date). This window mean is more
@@ -526,7 +534,8 @@ class SpatiotemporalDataset:
         return out
 
     def _load_point_obs(self) -> pd.DataFrame:
-        """Load station observations averaged over the overpass window.
+        """
+        Load station observations averaged over the overpass window.
 
         Readings with hour in [overpass_window_start, overpass_window_end]
         (inclusive) are averaged per (station_id, date). Consistent with the
@@ -564,7 +573,8 @@ class SpatiotemporalDataset:
         return out
 
     def _load_activity_forcing(self) -> pd.DataFrame:
-        """Load traffic volume averaged over the overpass window per day.
+        """
+        Load traffic volume averaged over the overpass window per day.
 
         Readings with hour in [overpass_window_start, overpass_window_end]
         (inclusive) are averaged per date. Anomaly Δ(t) = (window_mean −
@@ -605,7 +615,8 @@ class SpatiotemporalDataset:
         return hourly[["date", "activity_mean", "delta_activity"]]
 
     def _load_met_forcing(self) -> pd.DataFrame:
-        """Load meteorological forcing and compute per-cell scalar W(s,t).
+        """
+        Load meteorological forcing and compute per-cell scalar W(s,t).
 
         For wind data with sector structure:
           W(s,t) = Σ_k freq_k(s,t) × speed_k(s,t)
@@ -614,6 +625,7 @@ class SpatiotemporalDataset:
         giving a single scalar that represents how strongly wind is flushing
         each cell on each day. Any met forcing data with the same sector
         structure (freq + speed per sector) is supported.
+        Data already window averaged.
         """
         path = self.ts_dir / self.met_forcing_file
         logger.info("Loading meteorological forcing from %s", path)
@@ -670,7 +682,9 @@ class SpatiotemporalDataset:
     # -----------------------------------------------------------------------
 
     def summary(self) -> str:
-        """Print a summary of what data is available in this dataset."""
+        """
+        Print a summary of what data is available in this dataset.
+        """
         lines = [
             "SpatiotemporalDataset",
             "=" * 50,
