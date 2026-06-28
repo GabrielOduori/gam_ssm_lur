@@ -58,9 +58,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=3.0.0",
-    "black>=22.0.0",
     "ruff>=0.0.260",
-    "mypy>=0.950",
     "pre-commit>=2.17.0",
 ]
 docs = [
@@ -88,25 +86,6 @@ gam-ssm-predict = "gam_ssm_lur.cli:predict"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.black]
-line-length = 88
-target-version = ["py39", "py310", "py311"]
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.eggs
-  | \.git
-  | \.hatch
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
-
 [tool.ruff]
 line-length = 88
 
@@ -120,7 +99,7 @@ select = [
     "B",   # flake8-bugbear
 ]
 ignore = [
-    "E501",  # line too long (handled by black)
+    "E501",  # line too long (handled by ruff format)
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]
@@ -134,12 +113,6 @@ ignore = [
 # package they're not installed as -- E402 (import-not-at-top) is expected
 "experiments/*.py" = ["E402"]
 ".tools/*.py" = ["E402"]
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
