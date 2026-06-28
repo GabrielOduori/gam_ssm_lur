@@ -39,6 +39,7 @@ class TrafficFieldCalibration:
     epa_residual is the EPA observation minus the GAM+SSM prediction
     (i.e. what the satellite-driven model failed to explain).
     """
+
     beta0: float
     beta1: float
     n_obs: int
@@ -114,7 +115,9 @@ def compute_traffic_field(
     df[timestamp_col] = pd.to_datetime(df[timestamp_col])
     df["hour"] = df[timestamp_col].dt.hour
     df["date"] = df[timestamp_col].dt.date
-    win = df[(df["hour"] >= overpass_window_start) & (df["hour"] <= overpass_window_end)]
+    win = df[
+        (df["hour"] >= overpass_window_start) & (df["hour"] <= overpass_window_end)
+    ]
     daily = win.groupby([site_col, "date"])[value_col].mean()
 
     n_cells = idxs.shape[0]
@@ -143,13 +146,15 @@ def compute_traffic_field(
         with np.errstate(invalid="ignore", divide="ignore"):
             field[t, :] = np.where(
                 w_sum > 0,
-                np.nansum(np.where(valid, vol_neighbors * w, 0.0), axis=1) / np.where(w_sum > 0, w_sum, 1.0),
+                np.nansum(np.where(valid, vol_neighbors * w, 0.0), axis=1)
+                / np.where(w_sum > 0, w_sum, 1.0),
                 np.nan,
             )
 
     logger.info(
         "Traffic field built: shape=%s, %.1f%% cells with data per day (median)",
-        field.shape, 100 * np.median((~np.isnan(field)).mean(axis=1)),
+        field.shape,
+        100 * np.median((~np.isnan(field)).mean(axis=1)),
     )
     return field
 
@@ -183,7 +188,9 @@ def calibrate_traffic_field(
     n = int(mask.sum())
     if n < min_obs:
         logger.warning(
-            "Only %d valid traffic-EPA pairs (need %d); using null calibration (beta1=0).", n, min_obs,
+            "Only %d valid traffic-EPA pairs (need %d); using null calibration (beta1=0).",
+            n,
+            min_obs,
         )
         return TrafficFieldCalibration(beta0=0.0, beta1=0.0, n_obs=n, r=float("nan"))
 
@@ -196,6 +203,9 @@ def calibrate_traffic_field(
 
     logger.info(
         "Traffic field calibration: N=%d  residual = %.4f + %.6f * traffic  r=%.4f",
-        n, beta0, beta1, r,
+        n,
+        beta0,
+        beta1,
+        r,
     )
     return TrafficFieldCalibration(beta0=beta0, beta1=beta1, n_obs=n, r=r)

@@ -1,13 +1,11 @@
 # Makefile for GAM-SSM-LUR development
 
-.PHONY: help install install-dev test test-quick lint format check clean docs build publish publish-test example reproduce
+.PHONY: help install install-dev test test-quick lint format check clean docs build publish publish-test reproduce
 
 PYTHON := python
 PIP := pip
 PYTEST := pytest
-BLACK := black
 RUFF := ruff
-MYPY := mypy
 
 # Default target
 help:
@@ -20,8 +18,8 @@ help:
 	@echo ""
 	@echo "Quality:"
 	@echo "  make test         Run tests with coverage"
-	@echo "  make lint         Run linters (ruff, mypy)"
-	@echo "  make format       Format code with black"
+	@echo "  make lint         Run ruff check"
+	@echo "  make format       Format code with ruff format"
 	@echo "  make check        Run all checks (format, lint, test)"
 	@echo ""
 	@echo "Build:"
@@ -30,7 +28,6 @@ help:
 	@echo "  make clean        Remove build artifacts"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make example      Run basic example"
 	@echo "  make reproduce    Reproduce paper results"
 
 # Installation
@@ -40,6 +37,7 @@ install:
 install-dev:
 	$(PIP) install -e ".[dev]"
 	pre-commit install
+	pre-commit install --hook-type commit-msg
 
 # Testing
 test:
@@ -50,12 +48,11 @@ test-quick:
 
 # Code quality
 lint:
-	$(RUFF) check src/ tests/ experiments/
-	$(MYPY) src/gam_ssm_lur/ --ignore-missing-imports
+	$(RUFF) check src/ tests/ experiments/ .tools/
 
 format:
-	$(BLACK) src/ tests/ experiments/
-	$(RUFF) check src/ tests/ experiments/ --fix
+	$(RUFF) format src/ tests/ experiments/ .tools/
+	$(RUFF) check src/ tests/ experiments/ .tools/ --fix
 
 check: format lint test
 
@@ -85,11 +82,8 @@ clean:
 	find . -type f -name "*.pyc" -delete
 
 # Examples
-example:
-	$(PYTHON) experiments/01_basic_usage.py
-
 reproduce:
-	$(PYTHON) experiments/reproduce_paper.py --data-dir data/ --output-dir results/
+	$(PYTHON) experiments/reproduce_paper.py --data-dir data/
 
 # Publishing (use with caution)
 publish-test:
