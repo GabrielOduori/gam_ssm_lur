@@ -10,7 +10,7 @@ A Python framework for spatio-temporal air pollution modelling that integrates G
 Traditional Land Use Regression (LUR) models capture spatial heterogeneity in air pollution but treat temporal variation through model structure rather than as an explicit dynamical process. This package implements a hybrid framework that:
 
 1. **GAM Component**: Captures persistent spatial patterns through smooth functions of land use, road network, and traffic covariates
-2. **SSM Component**: Models temporal dynamics via Kalman filtering with Expectation-Maximisation parameter estimation. The GAM-regression coefficient (β) and external forcing coefficients (e.g. traffic anomaly, wind; B̃) are jointly estimated alongside the latent dynamics by an augmented-state EM, rather than pre-estimated by OLS and subtracted — avoiding silently discarding their estimation error into the dynamics (Harvey, 1989, Ch. 3.3).
+2. **SSM Component**: Models temporal dynamics via Kalman filtering with Expectation-Maximisation parameter estimation. The GAM-regression coefficient (β) and external forcing coefficients (e.g. traffic anomaly, wind; B̃) are jointly estimated alongside the latent dynamics by an augmented-state EM, rather than pre-estimated by OLS and subtracted , avoiding silently discarding their estimation error into the dynamics (Harvey, 1989, Ch. 3.3).
 3. **Uncertainty Quantification**: Provides prediction intervals through posterior state distributions
 
 ## Model Architecture
@@ -57,7 +57,7 @@ cd gam_ssm_lur
 pip install -e ".[dev]"
 ```
 
-Or, using the `Makefile` shortcut (also registers both pre-commit hook stages — see Development below):
+Or, using the `Makefile` shortcut (also registers both pre-commit hook stages , see Development below):
 
 ```bash
 make install-dev
@@ -119,7 +119,7 @@ data/
 
 ### Data Access
 
-The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI — always resolves to the latest version).
+The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI , always resolves to the latest version).
 
 You don't need to download this manually. If `data/` is missing any required file, `experiments/reproduce_paper.py` automatically fetches and extracts the archive on first run via `ensure_data_available()` in `src/gam_ssm_lur/fetch_data.py`. To trigger this fetch standalone:
 
@@ -181,31 +181,31 @@ Outputs are saved to `experiments/results/run_YYYYMMDD_HHMMSS/` by default.
 All outputs are written to `experiments/results/run_YYYYMMDD_HHMMSS/`:
 
 **Model:**
-- `model/` — saved model weights and parameters
-- `selected_features.txt` — features selected by the pipeline
-- `feature_importances.csv` — Random Forest importances
-- `model_summary.txt` — performance metrics and calibration report
-- `model_comparison.csv` — GAM-LUR vs GAM-SSM vs LOOCV side-by-side with improvement row
-- `model_comparison.tex` — LaTeX table ready for manuscript inclusion
+- `model/` : saved model weights and parameters
+- `selected_features.txt` : features selected by the pipeline
+- `feature_importances.csv` : Random Forest importances
+- `model_summary.txt` : performance metrics and calibration report
+- `model_comparison.csv` : GAM-LUR vs GAM-SSM vs LOOCV side-by-side with improvement row
+- `model_comparison.tex` : LaTeX table ready for manuscript inclusion
 
 **Figures (`figures/`):**
-- `static_lur_prior.png` — GAM spatial prediction surface
-- `spatial_residuals.png` — signed and absolute GAM residuals
-- `residual_diagnostics.png` — 2×3 residual diagnostic panel
-- `em_convergence.png` — EM algorithm convergence trace
-- `ssm_selected_days.png` — SSM temporal snapshots (min / lower-tercile / upper-tercile / max pollution days, excluding the first/last calendar day — RTS smoother boundary estimates are least reliable there)
-- `ssm_daily_mean_barchart.png` — daily area-mean NO₂ bar chart with map days highlighted
-- `station_timeseries.png` — per-station time series (GAM prior, SSM-corrected, observed)
-- `loocv_scatter.png` — leave-one-out cross-validation scatter
-- `wind_sector_map.png` — GAM NO₂ map per dominant wind sector
-- `svd_scree.png` — SVD factor-selection diagnostic
-- `factor_heatmap.png` — latent SSM factor × day heatmap
-- `shap_summary.png` — SHAP beeswarm feature importance (exact closed-form additive Shapley values)
-- `moran_scatterplot.png` — Moran's I spatial autocorrelation of GAM residuals (if computed)
-- `tropomi_epa_calibration_scatter.png` — TROPOMI-EPA satellite-to-surface OLS calibration scatter
-- `reliability_diagram.png` — probabilistic calibration (reliability + sharpness + ISS)
-- `epa_vs_predicted_timeseries.png` — per-station observed-vs-predicted time series
-- `epa_daily_mean_timeseries.png` — daily-mean observed-vs-predicted time series
+- `static_lur_prior.png` : GAM spatial prediction surface
+- `spatial_residuals.png` : signed and absolute GAM residuals
+- `residual_diagnostics.png` : 2×3 residual diagnostic panel
+- `em_convergence.png` : EM algorithm convergence trace
+- `ssm_selected_days.png` : SSM temporal snapshots (min / lower-tercile / upper-tercile / max pollution days, excluding the first/last calendar day : RTS smoother boundary estimates are least reliable there)
+- `ssm_daily_mean_barchart.png` : daily area-mean NO₂ bar chart with map days highlighted
+- `station_timeseries.png` : per-station time series (GAM prior, SSM-corrected, observed)
+- `loocv_scatter.png` : leave-one-out cross-validation scatter
+- `wind_sector_map.png` : GAM NO₂ map per dominant wind sector
+- `svd_scree.png` : SVD factor-selection diagnostic
+- `factor_heatmap.png` : latent SSM factor × day heatmap
+- `shap_summary.png` : SHAP beeswarm feature importance (exact closed-form additive Shapley values)
+- `moran_scatterplot.png` : Moran's I spatial autocorrelation of GAM residuals (if computed)
+- `tropomi_epa_calibration_scatter.png` : TROPOMI-EPA satellite-to-surface OLS calibration scatter
+- `reliability_diagram.png` : probabilistic calibration (reliability + sharpness + ISS)
+- `epa_vs_predicted_timeseries.png` : per-station observed-vs-predicted time series
+- `epa_daily_mean_timeseries.png` : daily-mean observed-vs-predicted time series
 
 ### Scalability Modes
 
@@ -236,5 +236,5 @@ This work was supported by:
 
 ## Contact
 
-- Gabriel Oduori — gabriel.oduori@ucdconnect.ie
+- Gabriel Oduori : gabriel.oduori@ucdconnect.ie
 - Project: https://github.com/GabrielOduori/gam_ssm_lur
