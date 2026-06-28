@@ -85,7 +85,7 @@ pre-commit install --hook-type commit-msg   # also enforce the commit-msg check
 
 (`make install-dev` runs both of the above automatically.) After that, `git commit` runs `ruff check --fix` and `ruff format` against staged files, plus the commit-msg check, automatically.
 
-**Note:** the commit-msg hook script (`.tools/check_no_ai_attribution.sh`) lives in a gitignored directory and is not part of the repository — it exists only on machines where it's been set up already. On a fresh clone, `pre-commit install --hook-type commit-msg` will fail until that script is recreated locally (its content is in this repo's git history if needed).
+**Note:** the commit-msg hook script (`.tools/check_attribution.sh`) lives in a gitignored directory and is not part of the repository — it exists only on machines where it's been set up already. On a fresh clone, `pre-commit install --hook-type commit-msg` will fail until that script is recreated locally (its content is in this repo's git history if needed).
 
 To run the lint/format steps manually outside of a commit:
 

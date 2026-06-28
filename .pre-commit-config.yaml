@@ -9,6 +9,6 @@ repos:
     hooks:
       - id: no-ai-attribution
         name: Reject AI attribution in commit message
-        entry: .tools/check_no_ai_attribution.sh
+        entry: .tools/check_attribution.sh
         language: script
         stages: [commit-msg]
