@@ -36,6 +36,13 @@ REFACTORING_PLAN*
 CHANGELOG_VISUALIZATION*
 README_VISUALIZATION*
 
+# Quarto-rendered HTML duplicates of README.md/CONTRIBUTING.md -- the .md
+# source stays tracked, just not its regenerable rendered output.
+README.html
+README_files/
+CONTRIBUTING.html
+CONTRIBUTING_files/
+
 # Distribution / packaging
 .Python
 build/
