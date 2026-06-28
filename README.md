@@ -72,7 +72,7 @@ ruff check src/ tests/        # lint
 ruff format src/ tests/       # format
 ```
 
-Rule selection (`E`, `W`, `F`, `I`, `C`, `B` — pycodestyle, Pyflakes, isort, flake8-comprehensions, flake8-bugbear) and per-file exceptions (e.g. `E402` for the standalone scripts under `experiments/`/`scripts/` that bootstrap `sys.path` before importing the package) live in `pyproject.toml` under `[tool.ruff]`.
+Rule selection (`E`, `W`, `F`, `I`, `C`, `B` — pycodestyle, Pyflakes, isort, flake8-comprehensions, flake8-bugbear) and per-file exceptions (e.g. `E402` for the standalone scripts under `experiments/`/`.tools/` that bootstrap `sys.path` before importing the package) live in `pyproject.toml` under `[tool.ruff]`.
 
 ## Data Directory Structure
 

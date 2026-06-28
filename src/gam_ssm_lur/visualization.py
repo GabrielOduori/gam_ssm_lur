@@ -2224,7 +2224,7 @@ class DiagnosticsVisualizer:
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """Satellite-to-surface OLS calibration scatter, styled to match the
-        original scripts/tropomi_epa_scatter.py: one marker shape per station,
+        original .tools/tropomi_epa_scatter.py: one marker shape per station,
         TROPOMI VCD displayed scaled (x1e-4 mol/m^2), fit line + r^2/N equation.
 
         Plots calibration.collocated (the exact station-satellite pairs the

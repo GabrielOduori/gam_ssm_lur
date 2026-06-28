@@ -133,7 +133,7 @@ ignore = [
 # standalone scripts that insert their own path before importing the
 # package they're not installed as -- E402 (import-not-at-top) is expected
 "experiments/*.py" = ["E402"]
-"scripts/*.py" = ["E402"]
+".tools/*.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.9"

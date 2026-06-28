@@ -9,17 +9,18 @@ the same grid cell during the 11:00–13:00 UTC overpass window.
 
 Output
 ------
-scripts/outputs/tropomi_epa_calibration_scatter.png
+.tools/outputs/tropomi_epa_calibration_scatter.png
 """
 
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.linalg import lstsq
 
-os.chdir("/media/gabriel-oduori/SERVER/dev_space/gam_ssm_lur")
+os.chdir(Path(__file__).resolve().parent.parent)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MODEL_STATIONS = [
@@ -145,6 +146,6 @@ ax.grid(True, linestyle="--", alpha=0.35)
 
 plt.tight_layout()
 
-out = "scripts/outputs/tropomi_epa_calibration_scatter.png"
+out = ".tools/outputs/tropomi_epa_calibration_scatter.png"
 plt.savefig(out, dpi=300, bbox_inches="tight", facecolor="white")
 print(f"Saved: {out}")
