@@ -65,7 +65,7 @@ make install-dev
 
 ## Development
 
-The `Makefile` covers two different jobs — installing/checking the code, and running the experiment pipeline. It is not just a dev-quality tool:
+The `Makefile` covers two different tasks of installing/checking the code, and running the experiment pipeline as follows:
 
 ```bash
 make help          # list all available targets
@@ -85,16 +85,13 @@ make check         # format + lint + test, in one go
 make reproduce
 ```
 
-Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`, and commit messages are checked for AI-attribution trailers (e.g. `Co-Authored-By: Claude...`) via a local commit-msg hook:
+Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`:
 
 ```bash
-pre-commit install                          # one-time, after pip install -e ".[dev]"
-pre-commit install --hook-type commit-msg   # also enforce the commit-msg check
+pre-commit install   # one-time, after pip install -e ".[dev]"
 ```
 
-(`make install-dev` runs both of the above automatically.) After that, `git commit` runs `ruff check --fix` and `ruff format` against staged files, plus the commit-msg check, automatically.
-
-**Note:** the commit-msg hook script (`.tools/check_attribution.sh`) lives in a gitignored directory and is not part of the repository — it exists only on machines where it's been set up already. On a fresh clone, `pre-commit install --hook-type commit-msg` will fail until that script is recreated locally (its content is in this repo's git history if needed).
+(`make install-dev` also runs this.) After that, `git commit` runs `ruff check --fix` and `ruff format` against staged files automatically.
 
 To run the lint/format steps manually outside of a commit:
 

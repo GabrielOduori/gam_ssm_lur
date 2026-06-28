@@ -37,7 +37,6 @@ install:
 install-dev:
 	$(PIP) install -e ".[dev]"
 	pre-commit install
-	pre-commit install --hook-type commit-msg
 
 # Testing
 test:
