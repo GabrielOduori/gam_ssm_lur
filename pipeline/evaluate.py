@@ -80,15 +80,9 @@ def evaluate_model(
         from esda.moran import Moran
         from libpysal.weights import Queen
 
-        grid_gdf = static.grid_gdf if hasattr(static, "grid_gdf") else None
-        _gdf = (
-            grid_gdf
-            if grid_gdf is not None
-            else (static.grid_gdf if hasattr(static, "grid_gdf") else None)
-        )
-        if _gdf is not None:
+        if grid_gdf is not None:
             gam_res = model._y_train - lur_pred
-            loc_gdf = _gdf[_gdf["grid_id"].isin(model.location_ids_)].copy()
+            loc_gdf = grid_gdf[grid_gdf["grid_id"].isin(model.location_ids_)].copy()
             loc_gdf = (
                 loc_gdf.set_index("grid_id").reindex(model.location_ids_).reset_index()
             )
