@@ -242,3 +242,9 @@ talks/
 # Local OSM tile cache (not for git)
 outputs/osm_cache/
 _deprecated/
+
+# Dev/debug utilities, local-machine-only. NOTE: check_no_ai_attribution.sh
+# lives here too, so a fresh clone will NOT get the commit-msg hook script --
+# pre-commit install --hook-type commit-msg will fail until it's recreated
+# manually (see git history for its content if needed).
+.tools/
