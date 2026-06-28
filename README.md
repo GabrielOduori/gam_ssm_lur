@@ -1,4 +1,4 @@
-# GAM-SSM-LUR: Hybrid Generalized Additive Model–State Space Model for Land Use Regression
+# Hybrid Generalized Additive Model–State Space Model for Land Use Regression
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
