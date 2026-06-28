@@ -65,15 +65,24 @@ make install-dev
 
 ## Development
 
-A `Makefile` wraps the common dev commands:
+The `Makefile` covers two different jobs — installing/checking the code, and running the experiment pipeline. It is not just a dev-quality tool:
 
 ```bash
 make help          # list all available targets
+
+# Setup
+make install       # pip install -e .
+make install-dev   # pip install -e ".[dev]" + register both pre-commit hook stages
+
+# Code quality
 make test          # run tests with coverage
 make lint          # ruff check
 make format        # ruff format + ruff check --fix
 make check         # format + lint + test, in one go
-make reproduce     # run experiments/reproduce_paper.py against data/
+
+# Run the experiment (equivalent to the manual command in
+# "Reproducing Paper Results" below, using its default output path)
+make reproduce
 ```
 
 Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`, and commit messages are checked for AI-attribution trailers (e.g. `Co-Authored-By: Claude...`) via a local commit-msg hook:
@@ -132,6 +141,12 @@ The results reported in the paper were generated from version v3 of the dataset 
 python experiments/reproduce_paper.py \
   --data-dir data/ \
   --output-dir experiments/results/my_run
+```
+
+Or, without a custom output directory (uses the script's own auto-timestamped default):
+
+```bash
+make reproduce
 ```
 
 ### Regenerating figures only (no retraining)
