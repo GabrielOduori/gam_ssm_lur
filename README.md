@@ -57,15 +57,33 @@ cd gam_ssm_lur
 pip install -e ".[dev]"
 ```
 
-## Development
-
-Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`:
+Or, using the `Makefile` shortcut (also registers both pre-commit hook stages — see Development below):
 
 ```bash
-pre-commit install   # one-time, after pip install -e ".[dev]"
+make install-dev
 ```
 
-After that, `git commit` automatically runs `ruff check --fix` and `ruff format` against staged files. To run manually:
+## Development
+
+A `Makefile` wraps the common dev commands:
+
+```bash
+make help          # list all available targets
+make test          # run tests with coverage
+make lint          # ruff check
+make format        # ruff format + ruff check --fix
+make check         # format + lint + test, in one go
+make reproduce     # run experiments/reproduce_paper.py against data/
+```
+
+Linting and formatting are enforced via [ruff](https://docs.astral.sh/ruff/) on every commit through `pre-commit`, and commit messages are checked for AI-attribution trailers (e.g. `Co-Authored-By: Claude...`) via a local commit-msg hook:
+
+```bash
+pre-commit install                          # one-time, after pip install -e ".[dev]"
+pre-commit install --hook-type commit-msg   # also enforce the commit-msg check
+```
+
+(`make install-dev` runs both of the above automatically.) After that, `git commit` runs `ruff check --fix` and `ruff format` against staged files, plus the commit-msg check, automatically. To run the lint/format steps manually outside of a commit:
 
 ```bash
 ruff check src/ tests/        # lint
