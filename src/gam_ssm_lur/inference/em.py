@@ -136,7 +136,7 @@ class EMEstimator:
         Q_init: Optional[NDArray] = None,
         H_init: Optional[NDArray] = None,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray, NDArray]:
-        """Defaults: T = 0.95*I (dynamic block), Z = I, Q/H from observation variance, alpha_0 = 0, P_0 = I."""
+        """Defaults: T = 0.95*I, Z = I, Q/H from obs variance, alpha_0 = 0, P_0 = I."""
         obs_var = np.var(observations, axis=0).mean()
         d = self.dynamic_dim if self.dynamic_dim is not None else state_dim
 
@@ -262,7 +262,8 @@ class EMEstimator:
         current_H: NDArray,
         current_Z: NDArray,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray, NDArray]:
-        """T = S10 S00^-1;  Q = (S11_trans - T S10')/(T_len-1);  H = (Syy - 2 S_zay + S_zaz)/T_len.
+        """T = S10 S00^-1;  Q = (S11_trans - T S10')/(T_len-1);
+        H = (Syy - 2 S_zay + S_zaz)/T_len.
 
         (Shumway & Stoffer, 1982, Sec. 3.) T/Q updates are restricted to the
         leading dynamic_dim x dynamic_dim block; the trailing "fixed-effect"

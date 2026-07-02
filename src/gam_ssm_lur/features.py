@@ -1,20 +1,4 @@
-"""
-Feature Selection and Extraction for Land Use Regression.
-
-This module provides utilities for:
-1. Multi-stage feature selection (correlation, VIF, importance-based)
-2. Inverse distance transformation for proximity predictors
-3. Sparse cell filtering (OpenLUR-style)
-
-
-References
-----------
-.. [1] Hoek, G., et al. (2008). A review of land-use regression models.
-.. [2] Lautenschlager, F., et al. (2020). OpenLUR: Off-the-shelf air pollution
-       modeling with open features and machine learning.
-.. [3] Naughton, O., et al. (2018). A land use regression model for explaining
-       spatial variation in air pollution. Science of the Total Environment.
-"""
+"""Feature selection and extraction utilities for land use regression."""
 
 from __future__ import annotations
 
@@ -41,43 +25,9 @@ def inverse_distance_transform(
     min_distance: float = 1.0,
     drop_raw: bool = False,
 ) -> pd.DataFrame:
-    """
-    Transform raw distance columns to inverse-distance predictors.
+    """Transform raw distance columns to 1/d (and optionally 1/d²) predictors.
 
-    Closer sources produce higher pollution, so 1/d is the physically
-    appropriate predictor form. The squared term 1/d² additionally captures
-    the sharp near-source concentration gradient that a linear 1/d term
-    under-predicts.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Feature DataFrame containing distance columns.
-    distance_cols : list of str, optional
-        Names of columns to transform. If None, all columns whose names
-        contain ``distance_to_`` are used.
-    add_squared : bool
-        If True, also add 1/d² columns. Default True.
-    min_distance : float
-        Floor applied before inversion to avoid division by zero.
-        Default 1.0 (metre).
-    drop_raw : bool
-        If True, remove the original distance columns after transformation.
-        Default False (keep both so the selector can decide).
-
-    Returns
-    -------
-    pd.DataFrame
-        Input DataFrame with new ``*_inverse_distance`` (and optionally
-        ``*_inverse_distance_sq``) columns appended.
-
-    Examples
-    --------
-    >>> features = inverse_distance_transform(
-    ...     features,
-    ...     distance_cols=["distance_to_motorway", "distance_to_traffic_signals"],
-    ...     add_squared=True,
-    ... )
+    1/d is the physically appropriate form: closer sources → higher pollution.
     """
     df = df.copy()
 
@@ -129,42 +79,7 @@ def filter_sparse_cells(
     drop_zero_target: bool = True,
     id_cols: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Remove grid cells with insufficient predictor information.
-
-    Inspired by the OpenLUR methodology (Lautenschlager et al., 2020), which
-    restricts model training to cells with sufficient observed feature coverage.
-    Cells with all-zero features contain no OSM or traffic information and
-    would bias the model toward the intercept.
-
-    TODO: Might set this number to specific figure in future..
-    OpenLUR used a threshold of rows with min 200 predictors
-
-    Parameters
-    ----------
-    features : pd.DataFrame
-        Feature matrix (may include non-predictor columns such as
-        ``grid_id``, ``latitude``, ``longitude``).
-    target : pd.Series
-        Target values aligned with ``features``.
-    min_nonzero_features : int
-        Minimum number of non-zero predictor columns a cell must have
-        to be retained. Default 1.
-    drop_zero_target : bool
-        If True, also remove rows where target == 0, which typically
-        indicate cells outside the modelled domain. Default True.
-    id_cols : list of str, optional
-        Column names to exclude from the non-zero count (e.g. ``grid_id``,
-        ``latitude``, ``longitude``). If None, defaults to
-        ``["grid_id", "latitude", "longitude"]``.
-
-    Returns
-    -------
-    features_filtered : pd.DataFrame
-        Filtered feature matrix.
-    target_filtered : pd.Series
-        Filtered target values.
-    """
+    """Remove cells with < min_nonzero_features non-zero predictors (OpenLUR style)."""
     if id_cols is None:
         id_cols = ["grid_id", "latitude", "longitude"]
 
@@ -185,7 +100,7 @@ def filter_sparse_cells(
     n_sparse = sparse_mask.sum()
     if n_sparse:
         logger.info(
-            "filter_sparse_cells: dropping %d cells with fewer than %d non-zero predictors",
+            "filter_sparse_cells: dropping %d cells with < %d non-zero predictors",
             n_sparse,
             min_nonzero_features,
         )
@@ -204,26 +119,7 @@ def filter_sparse_cells(
 
 @dataclass
 class SelectionResult:
-    """
-    Results from feature selection pipeline.
-
-    Attributes
-    ----------
-    selected_features : List[str]
-        Names of selected features
-    n_original : int
-        Number of original features
-    n_selected : int
-        Number of selected features
-    dropped_correlation : List[str]
-        Features dropped due to high correlation
-    dropped_vif : List[str]
-        Features dropped due to high VIF
-    dropped_importance : List[str]
-        Features dropped due to low importance
-    feature_importances : pd.DataFrame
-        Importance scores for retained features
-    """
+    """Results from the three-stage feature selection pipeline."""
 
     selected_features: List[str]
     n_original: int
@@ -235,38 +131,7 @@ class SelectionResult:
 
 
 class FeatureSelector:
-    """
-    Multi-stage feature selection pipeline for LUR models.
-
-    Reviewer had a question about how features were selected for the final model.
-
-    This class does just that. Has also added a flowchart in the manuscript to
-    illustrate the process.
-
-    Implements a three-stage pipeline:
-    1. Correlation-based removal: Remove highly correlated features
-    2. VIF filtering: Remove features with high variance inflation
-    3. Importance-based selection: Keep the minimum set of features whose
-       cumulative RF importance reaches ``importance_threshold`` (default 0.95).
-       This is data-driven and reproducible — the number of selected features
-       emerges from the data rather than an arbitrary fixed count.
-
-    Parameters
-    ----------
-    correlation_threshold : float
-        Maximum allowed pairwise correlation (default 0.8)
-    vif_threshold : float
-        Maximum allowed VIF value (default 10.0)
-    importance_threshold : float
-        Cumulative RF importance threshold (default 0.95). Features are ranked
-        by importance and the minimum set that accounts for this fraction of
-        total importance is retained.
-    force_keep : List[str], optional
-        Features to always keep regardless of selection criteria
-    random_state : int, optional
-        Random seed for reproducibility
-
-    """
+    """Three-stage feature selector: correlation → VIF → cumulative RF importance."""
 
     def __init__(
         self,
@@ -292,23 +157,6 @@ class FeatureSelector:
         y: Union[NDArray, pd.Series],
         feature_names: Optional[List[str]] = None,
     ) -> FeatureSelector:
-        """
-        Fit the feature selector.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Feature matrix
-        y : array-like of shape (n_samples,)
-            Target values
-        feature_names : list of str, optional
-            Feature names. Inferred from DataFrame if available.
-
-        Returns
-        -------
-        self : FeatureSelector
-        """
-        # Convert to DataFrame for easier handling
         if isinstance(X, np.ndarray):
             if feature_names is None:
                 feature_names = [f"x{i}" for i in range(X.shape[1])]
@@ -368,7 +216,9 @@ class FeatureSelector:
         dropped_corr = [f for f in feature_names if f in to_remove]
         current_features = [f for f in feature_names if f not in to_remove]
         logger.info(
-            f"  Removed {len(dropped_corr)} correlated features, {len(current_features)} remaining"
+            "  Removed %d correlated features, %d remaining",
+            len(dropped_corr),
+            len(current_features),
         )
 
         # Stage 2: VIF filtering
@@ -406,7 +256,9 @@ class FeatureSelector:
 
         current_features = list(X_current.columns)  # order preserved through .drop()
         logger.info(
-            f"  Removed {len(dropped_vif)} high-VIF features, {len(current_features)} remaining"
+            "  Removed %d high-VIF features, %d remaining",
+            len(dropped_vif),
+            len(current_features),
         )
 
         # Re-add force-keep features if removed, preserving the original
@@ -494,19 +346,6 @@ class FeatureSelector:
         self,
         X: Union[NDArray, pd.DataFrame],
     ) -> pd.DataFrame:
-        """
-        Transform features using fitted selector.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Feature matrix
-
-        Returns
-        -------
-        X_selected : pd.DataFrame
-            Selected features
-        """
         if not self._is_fitted:
             raise RuntimeError("Selector not fitted. Call fit() first.")
 
@@ -526,23 +365,6 @@ class FeatureSelector:
         y: Union[NDArray, pd.Series],
         feature_names: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        """
-        Fit selector and transform features.
-
-        Parameters
-        ----------
-        X : array-like
-            Feature matrix
-        y : array-like
-            Target values
-        feature_names : list of str, optional
-            Feature names
-
-        Returns
-        -------
-        X_selected : pd.DataFrame
-            Selected features
-        """
         self.fit(X, y, feature_names)
         return self.transform(X)
 
@@ -574,8 +396,7 @@ class FeatureSelector:
         return vif
 
     def get_summary(self) -> str:
-        """
-        Get summary of selection results."""
+        """Return a text summary of feature selection results."""
         if not self._is_fitted:
             return "Selector not fitted."
 

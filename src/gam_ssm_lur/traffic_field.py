@@ -1,19 +1,9 @@
-"""Spatially-resolved traffic forcing for the SSM temporal component.
+"""Per-cell traffic forcing field: inverse-distance weighting to SCATS detectors.
 
-The existing SSM forcing (``data.py: _load_activity_forcing``) collapses all
-SCATS detectors to a single city-wide scalar per day, which the Kalman filter
-applies uniformly across all grid cells via the B matrix. That scalar cannot
-make the temporal correction follow the road network, because all spatial
-information in the detector network is discarded before it reaches the model.
-
-This module instead builds a per-cell, per-day traffic intensity field by
-inverse-distance weighting each grid cell to its nearest SCATS detectors,
-using the same overpass-window aggregation as the rest of the pipeline. The
-resulting (T, n_locations) field is calibrated against EPA residuals (the
-portion of EPA NO2 variance not already explained by GAM + the satellite-
-driven SSM correction) before being added to the model's prediction — kept
-as an independent additive term, not fed through the existing k=3 SVD
-bottleneck, since that bottleneck is what discards spatial detail.
+Replaces the city-wide scalar in _load_activity_forcing, which discards all
+spatial information from the detector network before it reaches the Kalman filter.
+The (T, n_locations) field is added as an independent additive term, not routed
+through the k=3 SVD bottleneck that would strip the spatial detail back out.
 """
 
 from __future__ import annotations
@@ -58,16 +48,10 @@ def build_cell_detector_weights(
     p: float = 1.5,
     dist_floor_m: float = 50.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Build inverse-distance weights from each grid cell to its k nearest detectors.
+    """Build inverse-distance weights from each cell to its k nearest detectors.
 
-    Geometry only — time-invariant, computed once and reused for every day.
-
-    Returns
-    -------
-    idxs : (n_cells, k) int array
-        Index of each of the k nearest detectors, into the detector array.
-    weights : (n_cells, k) float array
-        Normalised inverse-distance weights (rows sum to 1).
+    Geometry-only; computed once and reused for every day.
+    Returns (idxs, weights): (n_cells, k) int and float arrays.
     """
     tree = cKDTree(np.column_stack([det_lat, det_lon]))
     dists_deg, idxs = tree.query(np.column_stack([cell_lat, cell_lon]), k=k)
@@ -89,28 +73,7 @@ def compute_traffic_field(
     timestamp_col: str = "traffic_end_time",
     value_col: str = "traffic_volume",
 ) -> np.ndarray:
-    """Build the (T, n_cells) per-cell traffic intensity field.
-
-    For each day, the overpass-window mean volume at each detector is
-    distance-weighted onto every grid cell using the precomputed
-    ``idxs``/``weights`` from :func:`build_cell_detector_weights`.
-
-    Parameters
-    ----------
-    traffic_raw : pd.DataFrame
-        Raw (unaggregated) traffic time series with detector id, timestamp,
-        and volume columns.
-    dates : list
-        Ordered list of T dates matching the model's time index.
-    idxs, weights : arrays from build_cell_detector_weights
-    detector_site_ids : array
-        Detector site_id values in the same order used to build idxs/weights.
-
-    Returns
-    -------
-    field : (T, n_cells) ndarray
-        NaN where no detector data is available for that day.
-    """
+    """Build the (T, n_cells) per-cell traffic intensity field."""
     df = traffic_raw.dropna(subset=[timestamp_col, value_col]).copy()
     df[timestamp_col] = pd.to_datetime(df[timestamp_col])
     df["hour"] = df[timestamp_col].dt.hour
@@ -166,18 +129,7 @@ def calibrate_traffic_field(
     y_col: str = "obs_value",
     min_obs: int = 10,
 ) -> TrafficFieldCalibration:
-    """Fit traffic field calibration against EPA residuals.
-
-    Parameters
-    ----------
-    traffic_field : (T, n_cells)
-        Output of compute_traffic_field.
-    gam_ssm_pred : (T, n_cells)
-        Existing model's prediction (GAM + satellite-driven SSM), same shape.
-    epa_eval : pd.DataFrame
-        Must contain ``t_idx``, ``loc_idx``, and ``y_col`` columns (as used
-        elsewhere in the pipeline for EPA validation alignment).
-    """
+    """OLS calibration of the per-cell traffic field against EPA residuals."""
     t_idx = epa_eval["t_idx"].values
     loc_idx = epa_eval["loc_idx"].values
     y_obs = epa_eval[y_col].values
@@ -188,7 +140,7 @@ def calibrate_traffic_field(
     n = int(mask.sum())
     if n < min_obs:
         logger.warning(
-            "Only %d valid traffic-EPA pairs (need %d); using null calibration (beta1=0).",
+            "Only %d valid traffic-EPA pairs (need %d); null calibration (beta1=0).",
             n,
             min_obs,
         )

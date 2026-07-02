@@ -1375,7 +1375,7 @@ class TemporalVisualizer:
             )
             # Smoothed prediction
             ax.plot(grp[date_col], grp[pred_col], color=COL_SSM, lw=2, label="Smoothed")
-            # EPA observed — raw daily values as markers, rolling mean as the readable line
+            # EPA observed: raw daily values (markers), rolling mean (solid line)
             ax.plot(grp[date_col], grp[obs_col], "b.", ms=5, alpha=0.5)
             ax.plot(
                 grp[date_col],
@@ -2469,10 +2469,10 @@ def create_publication_figure_set(
     - ``spatial_residuals.png``      — signed and absolute residuals
     - ``residual_diagnostics.png``   — 2×3 diagnostic panel
     - ``ssm_selected_days.png``      — daily snapshot maps (if ssm_df provided)
-    - ``station_timeseries.png``     — per-station time series (if station_preds provided)
+    - ``station_timeseries.png``     — per-station time series (if station_preds)
     - ``loocv_scatter.png``          — LOOCV scatter (if cv_df provided)
     - ``em_convergence.png``         — EM convergence (if model has ssm_)
-    - ``wind_sector_map.png``        — GAM NO₂ map per dominant wind sector (if X_train_df provided)
+    - ``wind_sector_map.png``        — GAM NO₂ map per wind sector (if X_train_df)
 
     Parameters
     ----------

@@ -1,10 +1,4 @@
-"""
-Command-Line Interface for GAM-SSM-LUR.
-
-Provides CLI commands for training and prediction:
-    gam-ssm-train: Train a hybrid model
-    gam-ssm-predict: Generate predictions from a trained model
-"""
+"""CLI commands for training and prediction."""
 
 from __future__ import annotations
 
@@ -33,7 +27,7 @@ def train() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # ── Data directory (standard contract) ───────────────────────────────────
+    # data directory
     parser.add_argument(
         "--data-dir",
         "-d",
@@ -45,7 +39,7 @@ def train() -> None:
         ),
     )
 
-    # ── Column / file name overrides (all have Dublin defaults) ──────────────
+    # column/file name overrides
     parser.add_argument(
         "--target-col", default="atmos_no2", help="Target column name in target.csv"
     )
@@ -202,7 +196,7 @@ def train() -> None:
     from gam_ssm_lur.data import SpatiotemporalDataset
     from gam_ssm_lur.features import filter_sparse_cells, inverse_distance_transform
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # load data
     ds = SpatiotemporalDataset(
         data_dir=args.data_dir,
         target_col=args.target_col,
@@ -229,7 +223,7 @@ def train() -> None:
     logger.info("Calibrating dense observations against point observations...")
     calibration = ds.calibrate_dense_obs(temporal, static)
 
-    # ── Feature engineering ───────────────────────────────────────────────────
+    # feature engineering
     id_cols = ["grid_id", "latitude", "longitude"]
     features_df = inverse_distance_transform(static.features)
 
@@ -265,7 +259,7 @@ def train() -> None:
         X_df = selector.fit_transform(X_df, y_full)
         logger.info("Selected %d features", len(X_df.columns))
 
-    # ── Train model ───────────────────────────────────────────────────────────
+    # train model
     logger.info("Training hybrid GAM-SSM model...")
     model = HybridGAMSSM(
         n_splines=args.n_splines,
@@ -281,14 +275,14 @@ def train() -> None:
         calibration=calibration,
     )
 
-    # ── Save ──────────────────────────────────────────────────────────────────
+    # save
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model.save(output_dir / "model")
     logger.info("Model saved to %s", output_dir / "model")
 
-    # ── Evaluate ──────────────────────────────────────────────────────────────
+    # evaluate
     evaluator = ModelEvaluator(model)
 
     if model._residual_matrix is not None:

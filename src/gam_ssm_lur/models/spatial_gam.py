@@ -1,19 +1,4 @@
-"""
-Spatial Generalized Additive Model (GAM) for Land Use Regression.
-
-This module implements a GAM-based approach to land use regression, capturing
-non-linear relationships between spatial/environmental covariates and air
-pollutant concentrations.
-
-References
-----------
-.. [1] Hastie, T., & Tibshirani, R. (1986). Generalized additive models.
-       Statistical Science, 1(3), 297-310.
-.. [2] Wood, S. N. (2017). Generalized Additive Models: An Introduction with R.
-       Chapman and Hall/CRC.
-.. [3] Hoek, G., et al. (2008). A review of land-use regression models to assess
-       spatial variation of outdoor air pollution. Atmospheric Environment, 42(33).
-"""
+"""GAM spatial component for land use regression."""
 
 from __future__ import annotations
 
@@ -43,29 +28,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GAMSummary:
-    """Summary statistics for fitted GAM.
-
-    Attributes
-    ----------
-    r_squared : float
-        Coefficient of determination
-    adj_r_squared : float
-        Adjusted R-squared
-    deviance_explained : float
-        Proportion of deviance explained
-    gcv_score : float
-        Generalized Cross-Validation score
-    aic : float
-        Akaike Information Criterion
-    n_samples : int
-        Number of training samples
-    n_features : int
-        Number of features
-    edfs : NDArray
-        Effective degrees of freedom for each smooth term
-    feature_names : List[str]
-        Names of features
-    """
+    """Summary statistics for a fitted GAM."""
 
     r_squared: float
     adj_r_squared: float
@@ -80,21 +43,7 @@ class GAMSummary:
 
 @dataclass
 class PartialDependence:
-    """Partial dependence results for a single feature.
-
-    Attributes
-    ----------
-    feature_name : str
-        Name of the feature
-    grid : NDArray
-        Feature values on the grid
-    response : NDArray
-        Partial dependence values
-    confidence_lower : NDArray
-        Lower confidence bound
-    confidence_upper : NDArray
-        Upper confidence bound
-    """
+    """Partial dependence for a single feature."""
 
     feature_name: str
     grid: NDArray
@@ -104,47 +53,7 @@ class PartialDependence:
 
 
 class SpatialGAM(BaseEstimator):
-    """Generalized Additive Model for spatial air pollution prediction.
-
-    Implements a GAM-based Land Use Regression model that captures non-linear
-    relationships between pollutant concentrations and spatial covariates
-    (land use, road network, traffic).
-
-    Parameters
-    ----------
-    n_splines : int
-        Number of spline basis functions per smooth term
-    spline_order : int
-        Order of B-splines (default 3 = cubic)
-    lam : float or 'auto'
-        Smoothing parameter. 'auto' uses grid search.
-    link : {'identity', 'log'}
-        Link function for the GAM
-    distribution : {'normal', 'gamma', 'poisson'}
-        Response distribution family
-    fit_intercept : bool
-        Whether to fit an intercept term
-    max_iter : int
-        Maximum iterations for fitting
-    tol : float
-        Convergence tolerance
-
-    Attributes
-    ----------
-    gam_ : GAM
-        Fitted pygam model
-    feature_names_ : List[str]
-        Names of features used in fitting
-    is_fitted_ : bool
-        Whether the model has been fitted
-
-    Examples
-    --------
-    >>> model = SpatialGAM(n_splines=10, lam='auto')
-    >>> model.fit(X, y)
-    >>> predictions = model.predict(X_new)
-    >>> summary = model.summary()
-    """
+    """Linear GAM with B-splines for spatial NO₂ prediction."""
 
     def __init__(
         self,
@@ -189,12 +98,9 @@ class SpatialGAM(BaseEstimator):
         self._y_train: Optional[NDArray] = None
 
     def _build_formula(self, n_features: int) -> GAM:
-        """Build GAM formula with spline terms for each feature."""
-        # Build sum of spline terms
         terms = s(0, n_splines=self.n_splines, spline_order=self.spline_order)
         for i in range(1, n_features):
             terms += s(i, n_splines=self.n_splines, spline_order=self.spline_order)
-
         return LinearGAM(
             terms,
             fit_intercept=self.fit_intercept,
@@ -208,38 +114,19 @@ class SpatialGAM(BaseEstimator):
         y: Union[NDArray, pd.Series],
         feature_names: Optional[List[str]] = None,
     ) -> SpatialGAM:
-        """Fit the GAM to training data.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Training features (spatial covariates)
-        y : array-like of shape (n_samples,)
-            Target values (pollutant concentrations)
-        feature_names : list of str, optional
-            Names for each feature. Inferred from DataFrame if available.
-
-        Returns
-        -------
-        self : SpatialGAM
-            Fitted model
-        """
-        # Handle pandas inputs using utility functions
+        """Fit the GAM to training data."""
         X, self.feature_names_ = extract_feature_names(X, feature_names)
         y = ensure_array(y)
 
-        # Store training data for residual computation
         self._X_train = X
         self._y_train = y
 
         n_samples, n_features = X.shape
         logger.info(f"Fitting GAM with {n_samples} samples and {n_features} features")
 
-        # Build and fit model
         self.gam_ = self._build_formula(n_features)
 
         if self.lam == "auto":
-            # Grid search for optimal smoothing parameter
             logger.info("Performing grid search for smoothing parameters")
             lam_grid = np.logspace(-3, 3, 11)
             self.gam_.gridsearch(X, y, lam=lam_grid)
@@ -248,7 +135,8 @@ class SpatialGAM(BaseEstimator):
 
         self.is_fitted_ = True
         logger.info(
-            f"GAM fitted. R²={self.gam_.statistics_['pseudo_r2']['explained_deviance']:.4f}"
+            "GAM fitted. R²=%.4f",
+            self.gam_.statistics_["pseudo_r2"]["explained_deviance"],
         )
 
         return self
@@ -258,22 +146,7 @@ class SpatialGAM(BaseEstimator):
         X: Union[NDArray, pd.DataFrame],
         return_std: bool = False,
     ) -> Union[NDArray, Tuple[NDArray, NDArray]]:
-        """Generate predictions for new data.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Features for prediction
-        return_std : bool
-            If True, also return prediction standard errors
-
-        Returns
-        -------
-        y_pred : NDArray
-            Predicted values
-        y_std : NDArray, optional
-            Prediction standard errors (if return_std=True)
-        """
+        """Predict for new data; return (mean, std) if return_std=True."""
         self._check_fitted()
 
         if isinstance(X, pd.DataFrame):
@@ -283,7 +156,6 @@ class SpatialGAM(BaseEstimator):
         y_pred = self.gam_.predict(X)
 
         if return_std:
-            # Compute prediction intervals
             y_intervals = self.gam_.prediction_intervals(X, width=0.95)
             y_std = (y_intervals[:, 1] - y_intervals[:, 0]) / (2 * 1.96)
             return y_pred, y_std
@@ -295,20 +167,7 @@ class SpatialGAM(BaseEstimator):
         X: Optional[Union[NDArray, pd.DataFrame]] = None,
         y: Optional[Union[NDArray, pd.Series]] = None,
     ) -> NDArray:
-        """Compute residuals from fitted model.
-
-        Parameters
-        ----------
-        X : array-like, optional
-            Features. Uses training data if not provided.
-        y : array-like, optional
-            Targets. Uses training data if not provided.
-
-        Returns
-        -------
-        residuals : NDArray
-            Residuals (y - y_pred)
-        """
+        """Return residuals; uses training data if X/y not provided."""
         self._check_fitted()
 
         if X is None:
@@ -321,22 +180,14 @@ class SpatialGAM(BaseEstimator):
         if isinstance(y, pd.Series):
             y = y.values
 
-        y_pred = self.predict(X)
-        return y - y_pred
+        return y - self.predict(X)
 
     def summary(self) -> GAMSummary:
-        """Get model summary statistics.
-
-        Returns
-        -------
-        GAMSummary
-            Container with model statistics
-        """
+        """Return GAMSummary with fit statistics."""
         self._check_fitted()
 
         stats = self.gam_.statistics_
 
-        # Compute R-squared
         y_pred = self.predict(self._X_train)
         ss_res = np.sum((self._y_train - y_pred) ** 2)
         ss_tot = np.sum((self._y_train - np.mean(self._y_train)) ** 2)
@@ -364,26 +215,8 @@ class SpatialGAM(BaseEstimator):
         grid_size: int = 100,
         confidence_level: float = 0.95,
     ) -> PartialDependence:
-        """Compute partial dependence for a single feature.
-
-        Parameters
-        ----------
-        feature_idx : int
-            Index of feature to analyze
-        grid_size : int
-            Number of points in the grid
-        confidence_level : float
-            Confidence level for intervals
-
-        Returns
-        -------
-        PartialDependence
-            Partial dependence results
-        """
         self._check_fitted()
 
-        # Compute partial dependence using pygam
-        # partial_dependence returns (pdep, confi) where confi has shape (n, 2)
         XX = self.gam_.generate_X_grid(term=feature_idx, n=grid_size)
         pdep, confi = self.gam_.partial_dependence(
             term=feature_idx, X=XX, width=confidence_level
@@ -398,31 +231,20 @@ class SpatialGAM(BaseEstimator):
         )
 
     def get_feature_importance(self) -> pd.DataFrame:
-        """Compute feature importance based on deviance explained.
-
-        Returns
-        -------
-        pd.DataFrame
-            Feature importance scores sorted by importance
-        """
+        """Partial-R² importance for each feature."""
         self._check_fitted()
 
-        # Use effective degrees of freedom as a proxy for importance
         edfs = self.gam_.statistics_["edof_per_coef"]
 
-        # Compute partial R-squared for each feature
         importances = []
         y_pred_full = self.predict(self._X_train)
         ss_res_full = np.sum((self._y_train - y_pred_full) ** 2)
 
         for i in range(self._X_train.shape[1]):
-            # Crude approximation: zero out feature and recompute
             X_zeroed = self._X_train.copy()
             X_zeroed[:, i] = np.mean(X_zeroed[:, i])
             y_pred_zeroed = self.predict(X_zeroed)
             ss_res_zeroed = np.sum((self._y_train - y_pred_zeroed) ** 2)
-
-            # Increase in residual SS = importance
             importance = (ss_res_zeroed - ss_res_full) / ss_res_full
             importances.append(importance)
 
@@ -475,13 +297,7 @@ class SpatialGAM(BaseEstimator):
             self._y_train = state["training_data"]["y"]
 
     def save(self, filepath: str) -> None:
-        """Save fitted model to disk.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to save model
-        """
+        """Pickle the fitted model to filepath."""
         import pickle
 
         self._check_fitted()
@@ -511,18 +327,7 @@ class SpatialGAM(BaseEstimator):
 
     @classmethod
     def load(cls, filepath: str) -> SpatialGAM:
-        """Load fitted model from disk.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to saved model
-
-        Returns
-        -------
-        SpatialGAM
-            Loaded model
-        """
+        """Load a pickled model from filepath."""
         import pickle
 
         with open(filepath, "rb") as f:

@@ -36,33 +36,7 @@ def generate_figures(
     moran_result=None,
     moran_weights=None,
 ):  # noqa: ARG001
-    """Assemble and save all publication figures.
-
-    Parameters
-    ----------
-    model : HybridGAMSSM
-        Fitted model.
-    ds : SpatiotemporalDataset
-        Dataset object (used to load grid geometry).
-    hybrid_pred : HybridPrediction
-        Full spatiotemporal prediction from model.predict().
-    epa_eval : pd.DataFrame
-        EPA station observations aligned with model indices.
-    cv_df : pd.DataFrame or None
-        LOOCV results (or None).
-    X_train_df : pd.DataFrame
-        Training feature matrix with named columns.
-    args : argparse.Namespace
-        CLI arguments (met_forcing_file).
-    data_dir : Path
-        Root data directory.
-    output_dir : Path
-        Run output directory.
-    fig_dir : Path
-        Figures subdirectory.
-    imp : pd.DataFrame or None
-        Feature importances for the feature importance bar chart (optional).
-    """
+    """Save all publication figures to fig_dir."""
     grid_gdf = ds.load_grid_geometry()
     grid_id_to_idx = {gid: i for i, gid in enumerate(model.location_ids_)}
 
@@ -124,7 +98,7 @@ def generate_figures(
 
     sv = SpatialVisualizer(grid_gdf=grid_gdf, grid_ids=list(model.location_ids_))
 
-    # Redundant with SHAP beeswarm — SHAP shows direction + magnitude, RF importance just ranks
+    # Omitted — SHAP beeswarm shows direction + magnitude; RF importance only ranks
     # if imp is not None:
     #     sv.plot_feature_importance(
     #         imp, title="Selected Feature Importances",

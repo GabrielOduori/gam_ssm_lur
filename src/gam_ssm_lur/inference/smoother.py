@@ -1,10 +1,4 @@
-"""
-Rauch-Tung-Striebel (RTS) smoother built on top of the Kalman filter.
-
-The smoother reuses the same matrix operations and system matrices provided by
-an initialized :class:`~gam_ssm_lur.inference.kalman.KalmanFilter`, so the
-forward/backward passes stay consistent across scalability modes.
-"""
+"""Rauch-Tung-Striebel (RTS) smoother for linear Gaussian SSMs."""
 
 from __future__ import annotations
 
@@ -18,17 +12,7 @@ from gam_ssm_lur.inference.kalman import FilterResult, KalmanFilter
 
 @dataclass
 class SmootherResult:
-    """Complete RTS smoother results across all time steps.
-
-    Attributes
-    ----------
-    smoothed_means : NDArray
-        Smoothed state means, shape (T, state_dim)
-    smoothed_covariances : NDArray
-        Smoothed covariances
-    cross_covariances : NDArray
-        Cross-covariances for EM algorithm
-    """
+    """RTS smoother output across all T time steps."""
 
     smoothed_means: NDArray
     smoothed_covariances: NDArray
@@ -36,46 +20,17 @@ class SmootherResult:
 
 
 class RTSSmoother:
-    """Rauch-Tung-Striebel smoother for linear Gaussian state space models.
-
-    Computes smoothed state estimates using both forward (filtered) and
-    backward information. Required for EM parameter estimation.
-
-    Parameters
-    ----------
-    kalman_filter : KalmanFilter
-        Initialized Kalman filter with system matrices
-
-    Examples
-    --------
-    >>> kf = KalmanFilter(state_dim=100, obs_dim=100)
-    >>> kf.initialize(T=T, Z=Z, Q=Q, H=H)
-    >>> filter_result = kf.filter(observations)
-    >>> smoother = RTSSmoother(kf)
-    >>> smooth_result = smoother.smooth(filter_result)
-    """
+    """RTS smoother built on an initialized KalmanFilter."""
 
     def __init__(self, kalman_filter: KalmanFilter):
         self.kf = kalman_filter
         self.mode = kalman_filter.mode
 
     def smooth(self, filter_result: FilterResult) -> SmootherResult:
-        """Run RTS smoother on filtered results.
-
-        Parameters
-        ----------
-        filter_result : FilterResult
-            Output from KalmanFilter.filter()
-
-        Returns
-        -------
-        SmootherResult
-            Container with smoothed states and cross-covariances
-        """
+        """Backward smoothing pass over KalmanFilter.filter() output."""
         T_len = filter_result.filtered_means.shape[0]
         state_dim = self.kf.state_dim
 
-        # Initialize storage
         smoothed_means = np.zeros((T_len, state_dim))
         if self.mode == "diagonal":
             smoothed_covs = np.zeros((T_len, state_dim))
@@ -84,11 +39,9 @@ class RTSSmoother:
             smoothed_covs = np.zeros((T_len, state_dim, state_dim))
             cross_covs = np.zeros((T_len, state_dim, state_dim))
 
-        # Initialize at T
         smoothed_means[-1] = filter_result.filtered_means[-1]
         smoothed_covs[-1] = filter_result.filtered_covariances[-1]
 
-        # Backward recursion
         for t in range(T_len - 2, -1, -1):
             # Smoother gain: J_t = P_{t|t} T' P_{t+1|t}^{-1}
             filtered_cov_t = filter_result.filtered_covariances[t]

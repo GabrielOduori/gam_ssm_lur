@@ -53,18 +53,7 @@ def ensure_data_available(
     concept_doi: str = ZENODO_CONCEPT_DOI,
     archive_name: str = "data.zip",
 ) -> None:
-    """
-    Download and extract the dataset from Zenodo if any required file is missing.
-
-    Parameters
-    ----------
-    data_dir : Path
-        Expected location of the data directory (e.g. ``<repo>/data``).
-    concept_doi : str
-        Zenodo concept DOI; always resolves to the latest published version.
-    archive_name : str
-        Name of the archived file within the Zenodo record.
-    """
+    """Download and extract the Zenodo archive if any required file is missing."""
     missing = _missing_files(data_dir)
     if not missing:
         logger.info("All required data files present in %s.", data_dir)

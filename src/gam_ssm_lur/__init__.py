@@ -1,5 +1,6 @@
 """
-GAM-SSM-LUR: Hybrid Generalized Additive Model–State Space Model for Land Use Regression.
+GAM-SSM-LUR: Hybrid Generalized Additive Model–State Space Model
+for Land Use Regression.
 
 A Python framework for spatiotemporal air pollution modeling that integrates
 Generalized Additive Models (GAMs) with State Space Models (SSMs) for improved

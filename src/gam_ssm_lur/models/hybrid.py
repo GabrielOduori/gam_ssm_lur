@@ -45,7 +45,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class HybridPrediction:
-    """total = spatial + temporal (+ forcing), each (T, n_locations); std/lower/upper for intervals."""
+    """total = spatial + temporal (+ forcing), each (T, n_locations);
+    std/lower/upper for prediction intervals."""
 
     total: NDArray
     spatial: NDArray
@@ -68,7 +69,8 @@ class HybridSummary:
 
 
 class HybridGAMSSM:
-    """GAM-LUR spatial model + SSM temporal model, combined additively with uncertainty propagation."""
+    """GAM-LUR spatial model + SSM temporal model, combined additively
+    with full uncertainty propagation."""
 
     def __init__(
         self,
@@ -393,7 +395,7 @@ class HybridGAMSSM:
         self.Z_spatial_ = Vt[:k, :].T  # (n_locations, k) -- spatial loadings (Lambda)
         var_explained = 100 * (s[:k] ** 2).sum() / (s**2).sum()
         logger.info(
-            "Deviation-field SVD: top %d factors explain %.1f%% of variance -> SSM obs_dim=%d",
+            "SVD: top %d factors explain %.1f%% of variance, SSM obs_dim=%d",
             k,
             var_explained,
             k,
@@ -419,7 +421,7 @@ class HybridGAMSSM:
             0.0,
         )
         logger.info(
-            "Truncation variance: mean=%.3f, median=%.3f ug/m3 (added to prediction std)",
+            "Truncation variance: mean=%.3f, median=%.3f ug/m3 (added to std)",
             self._truncation_var_.mean(),
             np.median(self._truncation_var_),
         )
@@ -459,8 +461,8 @@ class HybridGAMSSM:
         time_index: NDArray,
         location_index: NDArray,
     ) -> Tuple[NDArray, NDArray, NDArray]:
-        """Flat (values, time_index, location_index) -> (T, n_locations) matrix, NaN-filled for missing,
-        then linearly interpolated per location."""
+        """Map flat (values, time_idx, loc_idx) -> (T, n_locs) matrix,
+        NaN-filled then linearly interpolated per location."""
         unique_times = np.unique(time_index)
         unique_locs = np.unique(location_index)
 
@@ -493,7 +495,7 @@ class HybridGAMSSM:
     def predict(
         self, X: Optional[Union[NDArray, pd.DataFrame]] = None
     ) -> HybridPrediction:
-        """total = beta_total*GAM + SSM temporal deviation + forcing term (+ traffic correction),
+        """total = beta_total*GAM + SSM deviation + forcing (+ traffic correction),
         with combined uncertainty. Uses training data/grid if X is None."""
         self._check_fitted()
 
@@ -608,7 +610,7 @@ class HybridGAMSSM:
         location_index: Union[NDArray, pd.Series],
         X: Optional[Union[NDArray, pd.DataFrame]] = None,
     ) -> NDArray:
-        """Remap the internal (time, location) grid prediction back to the original observation order."""
+        """Remap (time, location) grid prediction to original observation order."""
         self._check_fitted()
 
         if isinstance(time_index, pd.Series):
@@ -646,8 +648,8 @@ class HybridGAMSSM:
     def forecast(
         self, X_future: Union[NDArray, pd.DataFrame], n_steps: int
     ) -> HybridPrediction:
-        """Forecast n_steps ahead. No forcing/beta*GAM term: ssm_.forecast() extrapolates
-        only the dynamic (alpha) sub-block since future traffic/wind values aren't available here."""
+        """Forecast n_steps ahead; no forcing/beta*GAM — ssm_.forecast() extrapolates
+        the dynamic sub-block only (future traffic/wind values unavailable)."""
         self._check_fitted()
 
         if isinstance(X_future, pd.DataFrame):
@@ -689,7 +691,7 @@ class HybridGAMSSM:
         y_lower: Optional[NDArray] = None,
         y_upper: Optional[NDArray] = None,
     ) -> Dict[str, float]:
-        """RMSE/MAE/MBE/R2/correlation, plus coverage/CRPS if intervals given (or computed via predict())."""
+        """RMSE/MAE/MBE/R²/correlation; coverage/CRPS if intervals provided."""
         y_true = np.asarray(y_true).flatten()
         y_pred = np.asarray(y_pred).flatten()
 
@@ -775,7 +777,7 @@ class HybridGAMSSM:
         location_index: Union[NDArray, pd.Series],
         X: Optional[Union[NDArray, pd.DataFrame]] = None,
     ) -> Dict[str, float]:
-        """evaluate() using predictions aligned to observation order (when input isn't already grid-ordered)."""
+        """evaluate() with predictions already aligned to observation order."""
         aligned_pred = self.predict_in_observation_order(
             time_index=time_index, location_index=location_index, X=X
         )
@@ -787,10 +789,11 @@ class HybridGAMSSM:
         epa_eval: pd.DataFrame,
         y_col: str = "obs_value",
     ) -> TrafficFieldCalibration:
-        """Fit and attach a spatially-resolved traffic correction. Must be called after fit()/
-        fit_from_dataset(). Calibrates traffic_field (T, n_locations), same order as self.time_ids_/
-        location_ids_, against the EPA residual the current GAM+SSM prediction doesn't explain --
-        kept outside the k-factor SVD bottleneck so it can carry road-network-scale detail.
+        """Fit and attach a spatially-resolved traffic correction.
+
+        Must be called after fit()/fit_from_dataset(). Calibrates traffic_field
+        (T, n_locations) against the EPA residual the GAM+SSM doesn't explain.
+        Kept outside the SVD bottleneck to carry road-network-scale spatial detail.
         """
         from gam_ssm_lur.traffic_field import calibrate_traffic_field
 
@@ -816,10 +819,12 @@ class HybridGAMSSM:
         alpha: float = 0.05,
         station_ids: Optional[NDArray] = None,
     ) -> float:
-        """Leave-one-station-out split conformal calibration: per held-out station, calibrate
-        on the rest, take the (1-alpha) normalised-residual quantile, return the median q_hat
-        across folds. Multiply predict()'s std by q_hat for empirical (1-alpha) coverage at
-        station locations. Without station_ids, falls back to a single-split calibration.
+        """Leave-one-station-out conformal calibration of prediction std.
+
+        Per held-out station: calibrate on the rest, take the (1-alpha)
+        normalised-residual quantile, return median q_hat across folds.
+        Multiply predict()'s std by q_hat for empirical (1-alpha) coverage.
+        Falls back to single-split if station_ids is None.
         """
         self._check_fitted()
 

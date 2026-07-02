@@ -1,19 +1,4 @@
-"""
-Kalman filter and Rauch-Tung-Striebel smoother for linear Gaussian SSMs.
-
-Three matrix backends (dense / diagonal / block-diagonal) so the same
-recursions scale from a handful of latent factors up to spatial grids with
-thousands of locations.
-
-References
-----------
-.. [1] Kalman, R. E. (1960). A new approach to linear filtering and prediction
-       problems. Journal of Basic Engineering, 82(1), 35-45.
-.. [2] Rauch, H. E., Tung, F., & Striebel, C. T. (1965). Maximum likelihood
-       estimates of linear dynamic systems. AIAA Journal, 3(8), 1445-1450.
-.. [3] Durbin, J., & Koopman, S. J. (2012). Time series analysis by state
-       space methods. Oxford University Press.
-"""
+"""Kalman filter: dense/diagonal/block-diagonal backends for linear Gaussian SSMs."""
 
 from __future__ import annotations
 
@@ -42,7 +27,7 @@ class FilteredState:
 
 @dataclass
 class SmoothedState:
-    """RTS smoother output at a single time step (cross_covariance feeds the EM M-step)."""
+    """RTS smoother result at one time step; cross_covariance feeds the EM M-step."""
 
     mean: NDArray
     covariance: NDArray
@@ -263,8 +248,11 @@ class KalmanFilter:
         predicted_mean: NDArray,
         predicted_covariance: NDArray,
     ) -> FilteredState:
-        """v_t = y_t - Z a_{t|t-1};  F_t = Z P_{t|t-1} Z' + H;  K_t = P_{t|t-1} Z' F_t^-1;
-        a_{t|t} = a_{t|t-1} + K_t v_t;  P_{t|t} = (I - K_t Z) P_{t|t-1}."""
+        """
+        v_t = y_t - Z a_{t|t-1};  F_t = Z P_{t|t-1} Z' + H;
+        K_t = P_{t|t-1} Z' F_t^-1;  a_{t|t} = a_{t|t-1} + K_t v_t;
+        P_{t|t} = (I - K_t Z) P_{t|t-1}.
+        """
         innovation = observation - self._matrix_multiply(self.Z, predicted_mean)
 
         if self.mode == "diagonal":
@@ -295,7 +283,7 @@ class KalmanFilter:
                 self.obs_dim
             )
             try:
-                # one Cholesky factor serves both the gain (solve F K' = P_Z') and the likelihood
+                # one Cholesky factor serves gain (F K' = P_Z') and the likelihood
                 chol_factor, lower = cho_factor(
                     innovation_cov_reg, lower=False, check_finite=False
                 )

@@ -1,17 +1,4 @@
-"""
-Model Evaluation and Diagnostics for GAM-SSM-LUR.
-
-This module provides comprehensive tools for:
-1. Predictive accuracy assessment (RMSE, MAE, R², correlation)
-2. Uncertainty calibration (coverage, interval width)
-3. Residual diagnostics (normality, autocorrelation, heteroscedasticity)
-4. Visualization of results
-
-References
-----------
-.. [1] Gneiting, T., & Raftery, A. E. (2007). Strictly proper scoring rules,
-       prediction, and estimation. Journal of the American Statistical Association.
-"""
+"""Model evaluation, calibration, and residual diagnostics."""
 
 from __future__ import annotations
 
@@ -29,22 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AccuracyMetrics:
-    """
-    Container for accuracy metrics.
-
-    Attributes
-    ----------
-    rmse : float
-        Root mean square error
-    mae : float
-        Mean absolute error
-    mbe : float
-        Mean bias error
-    r2 : float
-        Coefficient of determination
-    correlation : float
-        Pearson correlation coefficient
-    """
+    """Accuracy metrics container."""
 
     rmse: float
     mae: float
@@ -53,7 +25,6 @@ class AccuracyMetrics:
     correlation: float
 
     def to_dict(self) -> Dict[str, float]:
-        """Convert to dictionary."""
         return {
             "rmse": self.rmse,
             "mae": self.mae,
@@ -65,20 +36,7 @@ class AccuracyMetrics:
 
 @dataclass
 class CalibrationMetrics:
-    """
-    Container for uncertainty calibration metrics.
-
-    Attributes
-    ----------
-    coverage : Dict[str, float]
-        Coverage probability at different levels (50%, 80%, 90%, 95%)
-    mean_interval_width : float
-        Average width of 95% prediction interval
-    interval_skill_score : float
-        Interval skill score (Gneiting & Raftery, 2007)
-    crps : float
-        Continuous Ranked Probability Score
-    """
+    """Uncertainty calibration metrics container."""
 
     coverage: Dict[str, float]
     mean_interval_width: float
@@ -88,20 +46,7 @@ class CalibrationMetrics:
 
 @dataclass
 class ResidualDiagnostics:
-    """
-    Container for residual diagnostic results.
-
-    Attributes
-    ----------
-    mean : float
-        Mean of residuals (should be ~0)
-    std : float
-        Standard deviation of residuals
-    kurtosis : float
-        Excess kurtosis of residuals
-    acf : NDArray
-        Autocorrelation function values
-    """
+    """Residual diagnostic statistics."""
 
     mean: float
     std: float
@@ -110,27 +55,7 @@ class ResidualDiagnostics:
 
 
 class ModelEvaluator:
-    """
-    Comprehensive model evaluation and diagnostics.
-
-    Provides tools for assessing model performance including:
-    - Accuracy metrics (RMSE, MAE, R².)
-    - Uncertainty calibration (coverage, interval width)
-    - Residual diagnostics (normality, autocorrelation)
-    - Visualization tools
-
-    Parameters
-    ----------
-    model : HybridGAMSSM, optional
-        Fitted model to evaluate. Can also pass predictions directly.
-
-    Examples
-    --------
-    >>> evaluator = ModelEvaluator(model)
-    >>> metrics = evaluator.compute_accuracy(y_true, y_pred)
-    >>> evaluator.diagnostic_plots(save_path="figures/")
-    >>> evaluator.summary_report()
-    """
+    """Model evaluation and diagnostics."""
 
     def __init__(self, model=None):
         self.model = model
@@ -144,29 +69,14 @@ class ModelEvaluator:
         y_true: NDArray,
         y_pred: NDArray,
     ) -> AccuracyMetrics:
-        """Compute accuracy metrics.
-
-        Parameters
-        ----------
-        y_true : NDArray
-            True values
-        y_pred : NDArray
-            Predicted values
-
-        Returns
-        -------
-        AccuracyMetrics
-            Container with accuracy metrics
-        """
+        """Compute RMSE/MAE/MBE/R²/correlation."""
         y_true = np.asarray(y_true).flatten()
         y_pred = np.asarray(y_pred).flatten()
 
-        # Store for later use
         self._y_true = y_true
         self._y_pred = y_pred
         self._residuals = y_true - y_pred
 
-        # Compute metrics
         rmse = np.sqrt(np.mean(self._residuals**2))
         mae = np.mean(np.abs(self._residuals))
         mbe = np.mean(self._residuals)
@@ -175,7 +85,6 @@ class ModelEvaluator:
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
         r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
-        # Handle constant predictions
         if np.std(y_pred) > 0 and np.std(y_true) > 0:
             correlation = np.corrcoef(y_true, y_pred)[0, 1]
         else:
@@ -195,23 +104,7 @@ class ModelEvaluator:
         y_pred: NDArray,
         y_std: NDArray,
     ) -> CalibrationMetrics:
-        """
-        Compute uncertainty calibration metrics.
-
-        Parameters
-        ----------
-        y_true : NDArray
-            True values
-        y_pred : NDArray
-            Predicted means
-        y_std : NDArray
-            Predicted standard deviations
-
-        Returns
-        -------
-        CalibrationMetrics
-            Container with calibration metrics
-        """
+        """Compute coverage, ISS, CRPS at multiple quantile levels."""
         from scipy import stats
 
         y_true = np.asarray(y_true).flatten()
@@ -220,7 +113,6 @@ class ModelEvaluator:
 
         self._y_std = y_std
 
-        # Coverage at different levels
         coverage = {}
         for level in [0.50, 0.80, 0.90, 0.95]:
             z = stats.norm.ppf((1 + level) / 2)
@@ -230,11 +122,9 @@ class ModelEvaluator:
                 (y_true >= lower) & (y_true <= upper)
             )
 
-        # Mean interval width (95%)
         z_95 = stats.norm.ppf(0.975)
         interval_width = np.mean(2 * z_95 * y_std)
 
-        # Interval skill score
         alpha = 0.05
         lower_95 = y_pred - z_95 * y_std
         upper_95 = y_pred + z_95 * y_std
@@ -243,8 +133,6 @@ class ModelEvaluator:
         penalty_upper = (2 / alpha) * (y_true - upper_95) * (y_true > upper_95)
         iss = np.mean(width + penalty_lower + penalty_upper)
 
-        # CRPS (Continuous Ranked Probability Score)
-        # For Gaussian predictive distributions
         z = (y_true - y_pred) / y_std
         crps = np.mean(
             y_std
@@ -267,21 +155,7 @@ class ModelEvaluator:
         residuals: Optional[NDArray] = None,
         max_lag: int = 20,
     ) -> ResidualDiagnostics:
-        """
-        Compute residual diagnostics.
-
-        Parameters
-        ----------
-        residuals : NDArray, optional
-            Residuals to analyze. Uses stored residuals if not provided.
-        max_lag : int
-            Maximum lag for autocorrelation
-
-        Returns
-        -------
-        ResidualDiagnostics
-            Container with diagnostic results
-        """
+        """Compute mean/std/kurtosis/ACF of residuals."""
         from scipy import stats
 
         if residuals is None:
@@ -291,21 +165,14 @@ class ModelEvaluator:
         else:
             residuals = np.asarray(residuals).flatten()
 
-        mean = np.mean(residuals)
-        std = np.std(residuals)
-        kurtosis = stats.kurtosis(residuals)
-        acf = self._compute_acf(residuals, max_lag)
-
         return ResidualDiagnostics(
-            mean=mean,
-            std=std,
-            kurtosis=kurtosis,
-            acf=acf,
+            mean=np.mean(residuals),
+            std=np.std(residuals),
+            kurtosis=stats.kurtosis(residuals),
+            acf=self._compute_acf(residuals, max_lag),
         )
 
     def _compute_acf(self, x: NDArray, max_lag: int) -> NDArray:
-        """
-        Compute autocorrelation function."""
         n = len(x)
         mean = np.mean(x)
         var = np.var(x)
@@ -330,34 +197,10 @@ class ModelEvaluator:
         save_path: Optional[Union[str, Path]] = None,
         figsize: Tuple[int, int] = (12, 10),
     ) -> None:
-        """
-        Generate diagnostic plots.
-
-        Creates a 2x3 grid of diagnostic plots:
-        1. Observed vs Predicted scatter
-        2. Residuals vs Fitted
-        3. Q-Q plot
-        4. Residual histogram
-        5. Autocorrelation function
-        6. Temporal residual pattern
-
-        Parameters
-        ----------
-        y_true : NDArray, optional
-            True values
-        y_pred : NDArray, optional
-            Predicted values
-        y_std : NDArray, optional
-            Prediction standard deviations
-        save_path : str or Path, optional
-            Path to save figure
-        figsize : tuple
-            Figure size
-        """
+        """2×3 diagnostic panel: obs/pred, residuals, Q-Q, hist, ACF, temporal."""
         import matplotlib.pyplot as plt
         from scipy import stats
 
-        # Use stored values if not provided
         y_true = y_true if y_true is not None else self._y_true
         y_pred = y_pred if y_pred is not None else self._y_pred
 
@@ -372,7 +215,6 @@ class ModelEvaluator:
 
         fig, axes = plt.subplots(2, 3, figsize=figsize)
 
-        # 1. Observed vs Predicted
         ax = axes[0, 0]
         ax.scatter(y_pred, y_true, alpha=0.5, s=10, c="steelblue")
         min_val = min(y_pred.min(), y_true.min())
@@ -385,15 +227,12 @@ class ModelEvaluator:
         )
         ax.legend()
 
-        # 2. Residuals vs Fitted
         ax = axes[0, 1]
         ax.scatter(y_pred, residuals, alpha=0.5, s=10, c="steelblue")
         ax.axhline(y=0, color="r", linestyle="--", lw=2)
         ax.set_xlabel("Fitted Values")
         ax.set_ylabel("Residuals")
         ax.set_title("Residuals vs Fitted")
-
-        # Add loess smoothing line
         try:
             from scipy.ndimage import uniform_filter1d
 
@@ -406,14 +245,12 @@ class ModelEvaluator:
         except Exception:
             pass
 
-        # 3. Q-Q Plot
         ax = axes[0, 2]
         stats.probplot(residuals, dist="norm", plot=ax)
         ax.set_title("Normal Q-Q Plot")
         ax.get_lines()[0].set_markersize(3)
         ax.get_lines()[0].set_alpha(0.5)
 
-        # 4. Residual Histogram
         ax = axes[1, 0]
         ax.hist(
             residuals,
@@ -423,8 +260,6 @@ class ModelEvaluator:
             color="steelblue",
             edgecolor="white",
         )
-
-        # Overlay normal distribution
         x_range = np.linspace(residuals.min(), residuals.max(), 100)
         ax.plot(
             x_range,
@@ -438,13 +273,10 @@ class ModelEvaluator:
         ax.set_title(f"Residual Distribution\n(kurt={stats.kurtosis(residuals):.2f})")
         ax.legend()
 
-        # 5. Autocorrelation Function
         ax = axes[1, 1]
         max_lag = min(50, len(residuals) // 4)
         acf = self._compute_acf(residuals, max_lag)
-
         ax.bar(range(len(acf)), acf, color="steelblue", edgecolor="white")
-        # Confidence bounds (approximate 95% CI)
         ci = 1.96 / np.sqrt(len(residuals))
         ax.axhline(y=ci, color="r", linestyle="--", lw=1)
         ax.axhline(y=-ci, color="r", linestyle="--", lw=1)
@@ -453,16 +285,13 @@ class ModelEvaluator:
         ax.set_ylabel("ACF")
         ax.set_title("Residual Autocorrelation")
 
-        # 6. Temporal Pattern (if data has temporal structure)
         ax = axes[1, 2]
         if len(residuals) > 100:
-            # Rolling mean and std
             window = max(len(residuals) // 50, 10)
             rolling_mean = (
                 pd.Series(residuals).rolling(window=window, center=True).mean()
             )
             rolling_std = pd.Series(residuals).rolling(window=window, center=True).std()
-
             time_idx = np.arange(len(residuals))
             ax.fill_between(
                 time_idx,
@@ -501,18 +330,7 @@ class ModelEvaluator:
         save_path: Optional[Union[str, Path]] = None,
         figsize: Tuple[int, int] = (12, 4),
     ) -> None:
-        """
-        Plot EM algorithm convergence diagnostics.
-
-        Parameters
-        ----------
-        log_likelihoods : list of float, optional
-            Log-likelihood values at each iteration. Uses model if not provided.
-        save_path : str or Path, optional
-            Path to save figure
-        figsize : tuple
-            Figure size
-        """
+        """EM convergence: log-lik trace, increment, final parameters."""
         import matplotlib.pyplot as plt
 
         if log_likelihoods is None:
@@ -521,10 +339,8 @@ class ModelEvaluator:
             log_likelihoods = self.model.ssm_.em_result_.log_likelihoods
 
         fig, axes = plt.subplots(1, 3, figsize=figsize)
-
         iterations = range(len(log_likelihoods))
 
-        # 1. Log-likelihood
         ax = axes[0]
         ax.plot(iterations, log_likelihoods, "b-o", markersize=4)
         ax.set_xlabel("Iteration")
@@ -532,7 +348,6 @@ class ModelEvaluator:
         ax.set_title("EM Convergence: Log-Likelihood")
         ax.grid(True, alpha=0.3)
 
-        # 2. Log-likelihood increment
         ax = axes[1]
         if len(log_likelihoods) > 1:
             ll_diff = np.diff(log_likelihoods)
@@ -546,7 +361,6 @@ class ModelEvaluator:
             ax.legend()
             ax.grid(True, alpha=0.3)
 
-        # 3. Parameter traces (if available)
         ax = axes[2]
         if self.model is not None and hasattr(self.model, "ssm_"):
             ssm = self.model.ssm_
@@ -594,19 +408,7 @@ class ModelEvaluator:
         save_path: Optional[Union[str, Path]] = None,
         figsize: Tuple[int, int] = (10, 8),
     ) -> None:
-        """Plot spatial distribution of residuals.
-
-        Parameters
-        ----------
-        residuals : NDArray
-            Residual values for each location
-        coordinates : NDArray
-            Location coordinates, shape (n_locations, 2)
-        save_path : str or Path, optional
-            Path to save figure
-        figsize : tuple
-            Figure size
-        """
+        """Scatter map of residuals by (lon, lat)."""
         import matplotlib.pyplot as plt
 
         residuals = np.asarray(residuals).flatten()
@@ -614,7 +416,6 @@ class ModelEvaluator:
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-        # 1. Mean residual by location
         ax = axes[0]
         scatter = ax.scatter(
             coordinates[:, 0],
@@ -631,7 +432,6 @@ class ModelEvaluator:
         ax.set_ylabel("Latitude")
         ax.set_title("Spatial Distribution of Residuals")
 
-        # 2. Absolute residual (error magnitude)
         ax = axes[1]
         scatter = ax.scatter(
             coordinates[:, 0],
@@ -662,23 +462,7 @@ class ModelEvaluator:
         y_pred: Optional[NDArray] = None,
         y_std: Optional[NDArray] = None,
     ) -> str:
-        """Generate summary report.
-
-        Parameters
-        ----------
-        y_true : NDArray, optional
-            True values
-        y_pred : NDArray, optional
-            Predicted values
-        y_std : NDArray, optional
-            Prediction standard deviations
-
-        Returns
-        -------
-        str
-            Formatted summary report
-        """
-        # Use stored values if not provided
+        """Print and return a text summary of model accuracy/calibration/diagnostics."""
         y_true = y_true if y_true is not None else self._y_true
         y_pred = y_pred if y_pred is not None else self._y_pred
         y_std = y_std if y_std is not None else self._y_std
@@ -691,7 +475,6 @@ class ModelEvaluator:
         ]
 
         if y_true is not None and y_pred is not None:
-            # Accuracy metrics
             accuracy = self.compute_accuracy(y_true, y_pred)
             lines.extend(
                 [
@@ -706,7 +489,6 @@ class ModelEvaluator:
                 ]
             )
 
-            # Calibration metrics (if std available)
             if y_std is not None:
                 calibration = self.compute_calibration(y_true, y_pred, y_std)
                 lines.extend(
@@ -721,13 +503,12 @@ class ModelEvaluator:
                 lines.extend(
                     [
                         f"  Mean interval width: {calibration.mean_interval_width:.4f}",
-                        f"  Interval skill score: {calibration.interval_skill_score:.4f}",
+                        f"  Interval skill score: {calibration.interval_skill_score:.4f}",  # noqa: E501
                         f"  CRPS: {calibration.crps:.4f}",
                         "",
                     ]
                 )
 
-            # Residual diagnostics
             diagnostics = self.compute_residual_diagnostics()
             lines.extend(
                 [
@@ -740,14 +521,8 @@ class ModelEvaluator:
                 ]
             )
 
-        # Model info (if available)
         if self.model is not None:
-            lines.extend(
-                [
-                    "MODEL INFORMATION",
-                    "-" * 40,
-                ]
-            )
+            lines.extend(["MODEL INFORMATION", "-" * 40])
 
             if hasattr(self.model, "gam_") and self.model.gam_ is not None:
                 gam_summary = self.model.gam_.summary()
@@ -785,46 +560,7 @@ class ModelEvaluator:
         obs_col: str = "epa_no2",
         grid_id_col: str = "grid_id",
     ) -> pd.DataFrame:
-        """
-        Leave-one-station-out cross-validation of the GAM spatial component.
-
-        For each monitoring station the GAM is refitted on all spatial cells
-        *except* the cell that contains the station.  The held-out cell is then
-        predicted and the result compared against the station's observed annual
-        mean concentration.
-
-        This follows the spatial LOOCV procedure of Naughton et al. (2018) and
-        is the primary validation metric for the LUR component.
-
-        Parameters
-        ----------
-        station_obs : pd.DataFrame
-            One row per station with at minimum ``station_id``, ``grid_id``,
-            and an observed-value column.  Pass the point-obs DataFrame from
-            ``SpatiotemporalDataset.load_temporal()`` aggregated to annual means,
-            or any DataFrame with those three columns.
-        station_col : str
-            Column that identifies the station.
-        obs_col : str
-            Column holding the observed concentration value.
-        grid_id_col : str
-            Column mapping each station to a model grid cell.
-
-        Returns
-        -------
-        pd.DataFrame
-            One row per (station, leave-one-out prediction) with columns:
-            ``station_id``, ``grid_id``, ``obs_no2``, ``no2``.
-            Suitable for passing directly to
-            ``ModelComparisonVisualizer.plot_loocv_scatter()``.
-
-        Raises
-        ------
-        RuntimeError
-            If the model has not been fitted yet.
-        ValueError
-            If a station's ``grid_id`` is not found in the model's location IDs.
-        """
+        """Leave-one-station-out CV of the GAM spatial component."""
         if (
             self.model is None
             or not hasattr(self.model, "gam_")
@@ -839,7 +575,6 @@ class ModelEvaluator:
         y = self.model._y_train
         loc_ids = list(self.model.location_ids_)
 
-        # Aggregate station obs to a single row per station (use mean if multiple)
         station_summary = station_obs.groupby(
             [station_col, grid_id_col], as_index=False
         )[obs_col].mean()
@@ -860,13 +595,11 @@ class ModelEvaluator:
 
             idx = loc_ids.index(gid)
 
-            # Build leave-one-out training set
             mask = np.ones(len(loc_ids), dtype=bool)
             mask[idx] = False
             X_loo = X[mask]
             y_loo = y[mask]
 
-            # Refit a fresh GAM with same hyper-params as the original
             from gam_ssm_lur.models.spatial_gam import SpatialGAM
 
             gam_loo = SpatialGAM(
@@ -874,8 +607,6 @@ class ModelEvaluator:
                 lam=self.model.gam_.lam,
             )
             gam_loo.fit(X_loo, y_loo)
-
-            # Predict for the held-out cell
             y_pred = float(gam_loo.predict(X[[idx]])[0])
 
             records.append(
@@ -902,23 +633,8 @@ class ModelEvaluator:
         models: Dict[str, Tuple[NDArray, NDArray]],
         y_true: NDArray,
     ) -> pd.DataFrame:
-        """
-        Compare multiple models.
-
-        Parameters
-        ----------
-        models : dict
-            Dictionary mapping model names to (y_pred, y_std) tuples
-        y_true : NDArray
-            True values
-
-        Returns
-        -------
-        pd.DataFrame
-            Comparison table with metrics for each model
-        """
+        """Accuracy table comparing multiple (name → (pred, std)) models."""
         results = []
-
         for name, (y_pred, y_std) in models.items():
             accuracy = self.compute_accuracy(y_true, y_pred)
             row = {"Model": name}

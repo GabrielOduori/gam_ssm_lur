@@ -413,8 +413,8 @@ def _write_comparison_table(
     logger.info("Model comparison table → %s", csv_path)
 
     # LaTeX version
-    # I am writing mostly in latex and this sort of format outputs a nice table for the paper.
-    # saved time by using pandas' built-in to_latex() function, which handles formatting and escaping.
+    # Writing mostly in LaTeX; this format outputs a nice table for the paper.
+    # Uses pandas' built-in to_latex() which handles formatting and escaping.
     tex = df.style.to_latex(
         caption=(
             "Comparison of GAM-LUR and GAM-SSM model performance against EPA daily "

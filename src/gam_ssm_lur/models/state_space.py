@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SSMPrediction:
-    """Smoothed/forecasted mean, std, and (lower, upper) interval, each (T, n_locations)."""
+    """Smoothed/forecast arrays (T, n_locations): mean, std, lower, upper."""
 
     mean: NDArray
     std: NDArray
@@ -46,7 +46,7 @@ class SSMPrediction:
 
 @dataclass
 class SSMDiagnostics:
-    """LL/AIC/BIC, EM convergence, T-eigenvalues, Q/H trace, and B_tilde (forcing coefficients)."""
+    """Diagnostics: LL/AIC/BIC, convergence, T-eigenvalues, Q/H, B_tilde."""
 
     log_likelihood: float
     aic: float
@@ -311,7 +311,7 @@ class StateSpaceModel:
         self.beta_ = None
 
         logger.info(
-            "Fitting SSM (no regression effects): T=%d, obs_dim=%d, state_dim=%d, mode=%s",
+            "Fitting SSM: T=%d, obs_dim=%d, state_dim=%d, mode=%s",
             self._T_len,
             self._obs_dim,
             state_dim,
@@ -497,7 +497,7 @@ class StateSpaceModel:
         )
 
     def get_innovation_diagnostics(self, observations: NDArray) -> Dict[str, NDArray]:
-        """innovations = y_t - E[y_t | y_{1:t-1}], standardized, plus per-location ACF."""
+        """Standardised innovations y_t - E[y_t | y_{1:t-1}] and per-location ACF."""
         self._check_fitted()
 
         innovations = observations - self.filter_result_.predicted_means @ self.Z_.T

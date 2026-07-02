@@ -19,29 +19,7 @@ ID_COLS = ["grid_id", "latitude", "longitude"]
 
 
 def prepare_features(feat_df: pd.DataFrame, y_full, args, output_dir: Path):
-    """Clean features, aggregate road_length totals, run or load feature selection.
-
-    Parameters
-    ----------
-    feat_df : pd.DataFrame
-        Raw feature DataFrame including ID columns.
-    y_full : array-like
-        Target values aligned to feat_df rows.
-    args : argparse.Namespace
-        CLI arguments (corr_threshold, vif_threshold, n_features,
-        skip_feature_selection).
-    output_dir : Path
-        Run output directory — selected_features.txt is written here.
-
-    Returns
-    -------
-    X_df : pd.DataFrame
-        Selected feature matrix (cells × features).
-    static_sel : StaticData
-        StaticData rebuilt with only selected features (target=None; set by caller).
-    imp : pd.DataFrame or None
-        Feature importances from FeatureSelector, or None when skipping selection.
-    """
+    """Clean features, aggregate road totals, run or load feature selection."""
     feat_cols = [c for c in feat_df.columns if c not in ID_COLS]
     X_df = feat_df[feat_cols]
 
