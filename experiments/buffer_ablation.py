@@ -91,7 +91,31 @@ def to_circular(features: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def run_pipeline(name, features, target, station_summary, args, output_dir):
+def add_road_totals(features: pd.DataFrame) -> pd.DataFrame:
+    """Mirror pipeline.features.prepare_features: add road_length_*_total
+    columns summing the 8 sectors, alongside the sectored originals."""
+    road_buffers = sorted(
+        {
+            c.rsplit("_s", 1)[0]
+            for c in features.columns
+            if c.startswith("road_length_") and "_s" in c
+        }
+    )
+    totals = {}
+    for base in road_buffers:
+        cols = [f"{base}_s{i}" for i in range(8) if f"{base}_s{i}" in features.columns]
+        if cols:
+            totals[f"{base}_total"] = features[cols].sum(axis=1)
+    if totals:
+        features = pd.concat(
+            [features, pd.DataFrame(totals, index=features.index)], axis=1
+        )
+    return features
+
+
+def run_pipeline(
+    name, features, target, station_summary, args, output_dir, preselected=None
+):
     """Full spatial pipeline for one feature set; returns a metrics row."""
     t0 = time.time()
     feat_df = inverse_distance_transform(features)
@@ -104,13 +128,22 @@ def run_pipeline(name, features, target, station_summary, args, output_dir):
         X_df.median(numeric_only=True)
     )
 
-    selector = FeatureSelector(
-        correlation_threshold=args.corr_threshold,
-        vif_threshold=args.vif_threshold,
-        importance_threshold=args.importance_threshold,
-        random_state=42,
-    )
-    X_sel = selector.fit_transform(X_df, y_full)
+    if preselected is not None:
+        keep = [c for c in preselected if c in X_df.columns]
+        missing = [c for c in preselected if c not in X_df.columns]
+        if missing:
+            logger.warning(
+                "[%s] %d preselected features missing: %s", name, len(missing), missing
+            )
+        X_sel = X_df[keep]
+    else:
+        selector = FeatureSelector(
+            correlation_threshold=args.corr_threshold,
+            vif_threshold=args.vif_threshold,
+            importance_threshold=args.importance_threshold,
+            random_state=42,
+        )
+        X_sel = selector.fit_transform(X_df, y_full)
     logger.info(
         "[%s] selected %d / %d features", name, len(X_sel.columns), len(X_df.columns)
     )
@@ -188,11 +221,27 @@ def run(args) -> None:
         ["station_id", "grid_id"], as_index=False
     )["obs_value"].mean()
 
+    paper_features = None
+    sel_files = sorted(
+        (PROJECT_ROOT / "experiments" / "results").glob("run_*/selected_features.txt")
+    )
+    if sel_files:
+        paper_features = sel_files[-1].read_text().splitlines()
+        logger.info(
+            "Paper feature list: %s (%d features)", sel_files[-1], len(paper_features)
+        )
+
+    ws_features = add_road_totals(static.features)
+
+    arms = [
+        ("wind_sector", ws_features, None),
+        ("circular", to_circular(static.features), None),
+    ]
+    if paper_features:
+        arms.insert(0, ("wind_sector_paper31", ws_features, paper_features))
+
     rows = []
-    for name, feats in [
-        ("wind_sector", static.features),
-        ("circular", to_circular(static.features)),
-    ]:
+    for name, feats, presel in arms:
         rows.append(
             run_pipeline(
                 name,
@@ -201,6 +250,7 @@ def run(args) -> None:
                 station_summary,
                 args,
                 output_dir,
+                preselected=presel,
             )
         )
 
