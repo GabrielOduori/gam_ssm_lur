@@ -63,6 +63,24 @@ Or, using the `Makefile` shortcut (also registers both pre-commit hook stages , 
 make install-dev
 ```
 
+### Windows
+
+`make` is not available on Windows by default. Use the provided batch scripts instead:
+
+```bat
+install.bat          :: pip install -e .
+reproduce.bat        :: run the paper experiment
+```
+
+Or run the equivalent commands directly:
+
+```bat
+python -m pip install -e .
+python experiments/reproduce_paper.py --data-dir data/
+```
+
+If `python` is not recognised, use `py` (the Windows Python Launcher). If neither is found, install Python from [python.org](https://www.python.org/downloads/) and make sure to tick **"Add Python to PATH"** during setup.
+
 ## Development
 
 The `Makefile` covers two different tasks of installing/checking the code, and running the experiment pipeline as follows:
