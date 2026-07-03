@@ -1,4 +1,5 @@
-"""Spatiotemporal data loader for GAM-SSM-LUR.
+"""
+Spatiotemporal data loader for GAM-SSM-LUR.
 
 Input contract: features.csv, target.csv, and time_series/ sub-directory
 containing dense gridded observations (Kalman update), sparse point observations
@@ -191,8 +192,14 @@ class SpatiotemporalDataset:
         temporal: TemporalData,
         static: StaticData,
         min_collocated: int = 10,
+        exclude_station: Optional[str] = None,
     ) -> CalibrationResult:
-        """OLS fit of dense obs to point obs: surface = β₀ + β₁·satellite."""
+        """OLS fit of dense obs to point obs: surface = β₀ + β₁·satellite.
+
+        exclude_station: if given, that station's collocated rows are dropped
+        before the OLS fit, so the calibration is independent of it (used for
+        nested leave-one-station-out validation).
+        """
         sta_grids = temporal.point_obs[["station_id", "grid_id"]].drop_duplicates()
         merged = (
             temporal.dense_obs.merge(sta_grids, on="grid_id", how="inner")
@@ -203,6 +210,8 @@ class SpatiotemporalDataset:
             )
             .dropna(subset=["obs_value", "obs_dense"])
         )
+        if exclude_station is not None:
+            merged = merged[merged["station_id"] != exclude_station]
         n = len(merged)
 
         if n < min_collocated:

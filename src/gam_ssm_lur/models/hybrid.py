@@ -251,6 +251,7 @@ class HybridGAMSSM:
         feature_selector: Optional[object] = None,
         id_cols: Optional[List[str]] = None,
         target_col: str = "atmos_no2",
+        prefit_gam: Optional[object] = None,
     ) -> HybridGAMSSM:
         """High-level entry point for the standard Dublin-style data contract:
         static GAM-LUR fit, build forcing matrix from activity/met data, then
@@ -258,6 +259,10 @@ class HybridGAMSSM:
         calibration (SpatiotemporalDataset.calibrate_dense_obs output), if
         None, leaves dense observations uncalibrated. id_cols defaults to
         ["grid_id", "latitude", "longitude"].
+        prefit_gam: an already-fitted SpatialGAM to reuse instead of refitting.
+        The GAM target (AtmosPlan) is independent of the calibration, so
+        nested-validation folds that vary only the calibration can share one
+        GAM fit.
         """
 
         if id_cols is None:
@@ -324,9 +329,13 @@ class HybridGAMSSM:
         self._static = static
         self._dates = dates
 
-        logger.info("Fitting GAM spatial component")
-        self.gam_ = SpatialGAM(n_splines=self.n_splines, lam=self.gam_lam)
-        self.gam_.fit(X, y, feature_names=feature_names)
+        if prefit_gam is not None:
+            logger.info("Reusing pre-fitted GAM spatial component")
+            self.gam_ = prefit_gam
+        else:
+            logger.info("Fitting GAM spatial component")
+            self.gam_ = SpatialGAM(n_splines=self.n_splines, lam=self.gam_lam)
+            self.gam_.fit(X, y, feature_names=feature_names)
 
         # residuals are per-cell (not time-varying): the full spatiotemporal
         # residual matrix is built from dense obs below
