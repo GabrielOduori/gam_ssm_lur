@@ -54,7 +54,7 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 ```bash
 git clone https://github.com/GabrielOduori/gam_ssm_lur.git
 cd gam_ssm_lur
-pip install -e ".[dev]"
+python3 -m pip install -e ".[dev]"
 ```
 
 Or, using the `Makefile` shortcut (also registers both pre-commit hook stages , see Development below):
