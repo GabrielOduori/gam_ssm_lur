@@ -2,8 +2,8 @@
 
 .PHONY: help install install-dev test test-quick lint format check clean docs build publish publish-test reproduce
 
-PYTHON := python
-PIP := pip
+PYTHON := python3
+PIP := python3 -m pip
 PYTEST := pytest
 RUFF := ruff
 
