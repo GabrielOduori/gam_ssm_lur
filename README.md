@@ -156,12 +156,10 @@ The results reported in the paper were generated from version v3 of the dataset 
 ## Reproducing Paper Results
 
 ```bash
-python experiments/reproduce_paper.py \
-  --data-dir data/ \
-  --output-dir experiments/results/my_run
+python experiments/reproduce_paper.py --data-dir data/
 ```
 
-Or, without a custom output directory (uses the script's own auto-timestamped default):
+Results are written to `experiments/results/run_YYYYMMDD_HHMMSS/` automatically. Or using the Makefile shortcut:
 
 ```bash
 make reproduce
