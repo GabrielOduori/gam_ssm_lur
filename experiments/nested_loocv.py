@@ -1,24 +1,11 @@
 #!/usr/bin/env python
-"""
-Nested leave-one-station-out validation (leakage-free).
+"""Nested LOOCV: for each EPA station the Eq. 5 calibration and SSM are refit
+excluding that station; conformal q is from the remaining 8 stations only.
 
-The main run fits the TROPOMI->surface calibration (Eq. 5) on all collocated
-EPA station-days, and that calibrated field is the only observation entering
-the Kalman filter. Stations used for validation therefore influence the
-observation model. This script removes that leakage: for each EPA station,
-
-  1. the Eq. 5 OLS calibration is refit with that station excluded,
-  2. the SSM is refit on the recalibrated satellite field (the GAM is shared
-     across folds -- its target is the AtmosPlan surface, independent of EPA),
-  3. the conformal interval factor q_hat is computed from the remaining
-     stations only,
-  4. predictions and intervals are evaluated at the held-out station only.
-
-Pooled held-out metrics are directly comparable to the global-calibration
-numbers in model_comparison.csv (Table 6 of the manuscript).
+Outputs are directly comparable to model_comparison.csv (Table 6).
 
 Usage:
-    python experiments/nested_loocv.py            # reuse latest selected_features.txt
+    python experiments/nested_loocv.py
     python experiments/nested_loocv.py --output-dir experiments/results/nested_loocv
 """
 
@@ -94,7 +81,6 @@ def run(args) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------ load
     ds = SpatiotemporalDataset(
         data_dir=str(args.data_dir),
         target_col=args.target_col,
@@ -110,7 +96,6 @@ def run(args) -> None:
     static = ds.load_static()
     temporal = ds.load_temporal()
 
-    # ---------------------------------------------------------- features/GAM
     feat_df = inverse_distance_transform(static.features)
     feat_df, y_full = filter_sparse_cells(
         feat_df,
@@ -149,7 +134,8 @@ def run(args) -> None:
         )
         return model
 
-    # ------------------------------------------------- global (leaky) reference
+    # Global-calibration reference
+    # ----------------------------
     cal_global = ds.calibrate_dense_obs(temporal, static)
     model_global = fit_ssm(cal_global)
     epa_eval = build_epa_eval(
@@ -173,7 +159,8 @@ def run(args) -> None:
         {k: round(v, 3) for k, v in global_row.items() if k != "model"},
     )
 
-    # --------------------------------------------------------------- folds
+    # Per-station folds
+    # -----------------
     fold_rows = []
     cal_rows = []
     heldout_frames = []
@@ -244,7 +231,8 @@ def run(args) -> None:
             m.get("coverage_95", np.nan),
         )
 
-    # ------------------------------------------------------------- pooled
+    # Pooled
+    # ------
     all_held = pd.concat(heldout_frames, ignore_index=True)
     nested_row = pooled_metrics(
         evaluator,

@@ -1,17 +1,11 @@
 #!/usr/bin/env python
-"""
-Naive temporal baselines against EPA station-day observations.
+"""Naive temporal baselines against EPA station-day observations.
 
-Adds the reference rows the revision needs alongside Table 6:
-  - persistence (today = yesterday, per station), CRPS = MAE for a
-    deterministic forecast
-  - station climatology (jackknifed station mean: for each station-day, the
-    mean of that station's OTHER days), probabilistic via the station's
-    jackknifed std -> Gaussian CRPS
-  - domain climatology (jackknifed mean over all other station-days)
+Persistence, station climatology, and domain climatology, all jackknifed to
+avoid the target day informing its own baseline.
 
-Jackknifing avoids the target day informing its own baseline, so R^2 is not
-zero by construction.
+Usage:
+    python experiments/baselines.py
 """
 
 from __future__ import annotations
@@ -93,7 +87,8 @@ def main():
 
     rows = []
 
-    # ---------------------------------------------------------- persistence
+    # Persistence
+    # -----------
     df["obs_prev"] = df.groupby("station_id")["obs"].shift(1)
     pers = df.dropna(subset=["obs_prev"])
     rows.append(
@@ -105,7 +100,8 @@ def main():
         )
     )
 
-    # -------------------------------------------- station climatology (jack)
+    # Station climatology
+    # -------------------
     g = df.groupby("station_id")["obs"]
     n_s = g.transform("count")
     sum_s = g.transform("sum")
@@ -124,7 +120,8 @@ def main():
         )
     )
 
-    # --------------------------------------------- domain climatology (jack)
+    # Domain climatology
+    # ------------------
     N = len(df)
     total = df["obs"].sum()
     dom_mean = (total - df["obs"]) / (N - 1)

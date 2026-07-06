@@ -1,4 +1,6 @@
-"""Kalman filter: dense/diagonal/block-diagonal backends for linear Gaussian SSMs."""
+"""
+Kalman filter: dense/diagonal/block-diagonal backends for linear Gaussian SSMs.
+"""
 
 from __future__ import annotations
 

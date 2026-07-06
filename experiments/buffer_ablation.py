@@ -1,20 +1,19 @@
 #!/usr/bin/env python
-"""
-Wind-sector vs circular-buffer ablation for the GAM-LUR spatial component.
+"""Wind-sector vs circular-buffer ablation for the GAM-LUR spatial component.
 
-The manuscript's flagship predictor-engineering claim is that anisotropic
-wind-sector buffers outperform conventional isotropic circular buffers. This
-script tests it: a circular-buffer feature set is constructed by aggregating
-each sectored feature family across its 8 sectors (sum for lengths/areas/
-intensities; min for nearest-distance features -- the nearest source in any
-direction), which is exactly the isotropic equivalent of the same underlying
-OSM/SCATS geometry. Both sets then pass through the identical pipeline
-(inverse-distance transform, sparse-cell filter, three-stage feature
-selection with the same seed, GAM fit), and are compared on:
+The circular-buffer feature set is an independent extraction -- genuinely
+isotropic buffers at matching radii to the wind-sector predictors, built by
+osm_extrator_optimized.py (see data-tools/scripts/osm/) from the same
+OSM/SCATS sources, not derived from the sectored features. Both feature
+sets pass through the identical selection + GAM pipeline and are compared on
+AtmosPlan fit and spatial LOOCV at the 9 EPA stations.
 
-  - AtmosPlan emulation fit (R^2, RMSE, MAE) on the full grid
-  - leave-one-station-out spatial CV at the 9 EPA stations
-    (period-mean observed vs GAM prediction at the held-out cell)
+osm_circular_features.csv ships inside the archived data.zip (see
+fetch_data.ensure_data_available, called below), so a fresh clone gets it
+automatically along with the rest of the dataset.
+
+Usage:
+    python experiments/buffer_ablation.py
 """
 
 from __future__ import annotations
@@ -43,6 +42,7 @@ from gam_ssm_lur.features import (
     filter_sparse_cells,
     inverse_distance_transform,
 )
+from gam_ssm_lur.fetch_data import ensure_data_available
 from gam_ssm_lur.models.spatial_gam import SpatialGAM
 
 logging.basicConfig(
@@ -55,40 +55,25 @@ logger = logging.getLogger("buffer_ablation")
 EXPERIMENTS = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 ID_COLS = ["grid_id", "latitude", "longitude"]
-SECTOR_SUFFIXES = tuple(f"_s{i}" for i in range(8))
 
 
-def to_circular(features: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate _s0.._s7 sector features into isotropic circular buffers."""
-    sectored = {}
-    passthrough = []
-    for c in features.columns:
-        base = None
-        for suf in SECTOR_SUFFIXES:
-            if c.endswith(suf):
-                base = c[: -len(suf)]
-                break
-        if base is None:
-            passthrough.append(c)
-        else:
-            sectored.setdefault(base, []).append(c)
+def load_circular_features(csv_path: str) -> pd.DataFrame:
+    """Load a circular-buffer feature CSV from osm_extrator_optimized.py.
 
-    out = features[passthrough].copy()
-    agg_cols = {}
-    for base, cols in sectored.items():
-        block = features[cols]
-        if "distance" in base:
-            agg_cols[f"{base}_circ"] = block.min(axis=1)
-        else:
-            agg_cols[f"{base}_circ"] = block.sum(axis=1)
-    out = pd.concat([out, pd.DataFrame(agg_cols, index=features.index)], axis=1)
+    Ships inside the archived data.zip; call ensure_data_available() first
+    (done in run(), below) so a fresh clone has it before this is called.
+    """
+    df = pd.read_csv(csv_path)
+    missing = [c for c in ID_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Circular CSV missing columns: {missing}")
     logger.info(
-        "Circular set: %d sectored families aggregated, %d passthrough, %d total cols",
-        len(sectored),
-        len(passthrough),
-        len(out.columns),
+        "Circular features: %d cells, %d feature columns (%s)",
+        len(df),
+        len([c for c in df.columns if c not in ID_COLS]),
+        csv_path,
     )
-    return out
+    return df
 
 
 def add_road_totals(features: pd.DataFrame) -> pd.DataFrame:
@@ -202,6 +187,8 @@ def run(args) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    ensure_data_available(Path(args.data_dir))
+
     ds = SpatiotemporalDataset(
         data_dir=str(args.data_dir),
         target_col=args.target_col,
@@ -233,12 +220,14 @@ def run(args) -> None:
 
     ws_features = add_road_totals(static.features)
 
-    arms = [
-        ("wind_sector", ws_features, None),
-        ("circular", to_circular(static.features), None),
-    ]
+    arms = []
     if paper_features:
-        arms.insert(0, ("wind_sector_paper31", ws_features, paper_features))
+        arms.append(("wind_sector_paper31", ws_features, paper_features))
+    arms.append(("wind_sector", ws_features, None))
+    if args.circular_csv:
+        arms.append(("circular", load_circular_features(args.circular_csv), None))
+    else:
+        logger.warning("--circular-csv not provided; skipping circular arm")
 
     rows = []
     for name, feats, presel in arms:
@@ -271,6 +260,15 @@ def main() -> None:
     p.add_argument("--corr-threshold", type=float, default=0.8)
     p.add_argument("--vif-threshold", type=float, default=10.0)
     p.add_argument("--importance-threshold", type=float, default=0.95)
+    p.add_argument(
+        "--circular-csv",
+        default=str(DATA_DIR / "osm_circular_features.csv"),
+        help=(
+            "Circular-buffer feature CSV from osm_extrator_optimized.py. "
+            "Ships inside the archived data.zip; pass an empty string to "
+            "skip the circular arm entirely."
+        ),
+    )
     run(p.parse_args())
 
 

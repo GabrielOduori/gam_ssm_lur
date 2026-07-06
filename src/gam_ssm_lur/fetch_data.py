@@ -30,6 +30,7 @@ REQUIRED_FILES = (
     "time_series/satellite_retreavals.csv",
     "time_series/traffic_timeseries.csv",
     "time_series/wind_sector_2023-06_daily.csv",
+    "osm_circular_features.csv",
 )
 
 

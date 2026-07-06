@@ -1,4 +1,6 @@
-"""Rauch-Tung-Striebel (RTS) smoother for linear Gaussian SSMs."""
+"""
+Rauch-Tung-Striebel (RTS) smoother for linear Gaussian SSMs.
+"""
 
 from __future__ import annotations
 

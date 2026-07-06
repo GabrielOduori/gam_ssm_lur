@@ -1,24 +1,11 @@
 #!/usr/bin/env python
-"""
-(a) Filter-only one-day-ahead forecast evaluation, and (b) sensitivity of
-the GAM-SSM to the latent dimension k.
+"""Filter-only one-day-ahead forecast evaluation and k-sensitivity for GAM-SSM.
 
-Forecast evaluation: the paper's reported skill uses RTS-smoothed states,
-which condition on the full 30-day record including future days. Here the
-same fitted model is evaluated with three information sets at EPA
-station-days:
+Compares smoothed (t|T), filtered (t|t), and one-step-ahead (t|t-1) predictions
+at EPA station-days; also sweeps k in {1,2,3,5,10} recording SVD variance and skill.
 
-  smoothed   alpha_{t|T}   -- retrospective (as in the paper)
-  filtered   alpha_{t|t}   -- real-time nowcast (no future data)
-  one-step   alpha_{t|t-1} -- genuine one-day-ahead forecast
-
-For the one-step and filtered variants, the fixed effects (beta, B_tilde)
-are held at their full-sample EM estimates, so results are an upper bound
-on operational forecast skill. The exogenous forcing u_t (traffic anomaly,
-wind) is treated as known at forecast time.
-
-k-sensitivity: refits the SSM with k in {1, 2, 3, 5, 10} (shared GAM),
-recording SVD variance retained and pooled vs-EPA accuracy.
+Usage:
+    python experiments/forecast_and_k.py
 """
 
 from __future__ import annotations
@@ -126,7 +113,8 @@ def run(args) -> None:
         )
         return m
 
-    # ---------------------------------------------------------------- forecast
+    # Forecast variants
+    # -----------------
     model = fit_model(3)
     grid_id_to_idx = {gid: i for i, gid in enumerate(model.location_ids_)}
     date_to_tidx = {d: i for i, d in enumerate(model.time_ids_)}
@@ -165,7 +153,6 @@ def run(args) -> None:
             }
         )
 
-    # persistence on the same station-days for reference
     epa_sorted = epa.sort_values(["station_id", "t_idx"]).copy()
     epa_sorted["obs_prev"] = epa_sorted.groupby("station_id")["obs_value"].shift(1)
     pers = epa_sorted.dropna(subset=["obs_prev"])
@@ -187,7 +174,8 @@ def run(args) -> None:
     print("\n== Forecast evaluation (vs EPA station-days) ==")
     print(fc.round(3).to_string(index=False))
 
-    # ---------------------------------------------------------------- k-sens
+    # k-sensitivity
+    # -------------
     krows = []
     for k in [1, 2, 3, 5, 10]:
         t_k = time.time()
