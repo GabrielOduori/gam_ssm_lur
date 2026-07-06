@@ -228,6 +228,33 @@ All outputs are written to `experiments/results/run_YYYYMMDD_HHMMSS/`:
 - `epa_vs_predicted_timeseries.png` : per-station observed-vs-predicted time series
 - `epa_daily_mean_timeseries.png` : daily-mean observed-vs-predicted time series
 
+### Additional Experiment Scripts
+
+Each script is self-contained, reads from `data/` and writes results to `experiments/results/`.
+Run them after `reproduce_paper.py` has completed (results from the main run are used as inputs by some scripts).
+
+```bash
+# Leakage-free nested LOOCV (Table 6 cross-validation column)
+python experiments/nested_loocv.py
+
+# Naive temporal baselines — persistence, station and domain climatology (Table 7)
+python experiments/baselines.py
+
+# Component ablations — GAM-only, TROPOMI-only, SSM forcing knock-outs (Table 8)
+python experiments/component_ablations.py
+
+# Filter-only forecast evaluation and k-sensitivity analysis
+python experiments/forecast_and_k.py
+
+# ML and geostatistical benchmarks — RF, GBM, GP kriging (Table 7)
+python experiments/ml_geo_benchmarks.py
+
+# Wind-sector vs circular-buffer spatial feature ablation (Table 5)
+python experiments/buffer_ablation.py
+```
+
+All scripts accept `--help` for available options.
+
 ### Scalability Modes
 
 | Mode | Network Size | Strategy |
