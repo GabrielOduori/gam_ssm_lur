@@ -67,8 +67,6 @@ make install-dev
 
 ### Windows
 
-`make` is not available on Windows by default. Use the provided batch scripts instead:
-
 ```bat
 install.bat          :: pip install -e .
 reproduce.bat        :: run the paper experiment
