@@ -77,8 +77,11 @@ reproduce.bat        :: run the paper experiment
 Or run the equivalent commands directly:
 
 ```bat
-python -m pip install -e .
-python experiments/reproduce_paper.py --data-dir data/
+git clone https://github.com/GabrielOduori/gam_ssm_lur.git
+cd gam_ssm_lur
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -e ".[dev]"
 ```
 
 If `python` is not recognised, use `py` (the Windows Python Launcher). If neither is found, install Python from [python.org](https://www.python.org/downloads/) and make sure to tick **"Add Python to PATH"** during setup.
