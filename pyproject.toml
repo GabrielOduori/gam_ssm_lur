@@ -53,6 +53,7 @@ dependencies = [
     "tqdm>=4.62.0",
     "shap>=0.40.0",
     "jinja2>=3.0.0",
+    "contextily>=1.2.0",
 ]
 
 [project.optional-dependencies]
