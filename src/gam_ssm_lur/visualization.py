@@ -2544,12 +2544,12 @@ def create_publication_figure_set(
             title="GAM LUR — Spatial Prediction and Residuals",
             save_path=output_dir / "spatial_residuals.png",
         )
-        dv.plot_residual_panel(
-            model._y_train,
-            lur_pred,
-            title="GAM LUR — Residual Diagnostics",
-            save_path=output_dir / "residual_diagnostics.png",
-        )
+        # dv.plot_residual_panel(
+        #     model._y_train,
+        #     lur_pred,
+        #     title="GAM LUR — Residual Diagnostics",
+        #     save_path=output_dir / "residual_diagnostics.png",
+        # )
 
     # EM convergence
     if (
@@ -2622,11 +2622,12 @@ def create_publication_figure_set(
 
     # Wind sector map (requires fitted GAM + feature DataFrame)
     if X_train_df is not None and hasattr(model, "gam_") and model.gam_ is not None:
-        sv.plot_wind_sector_map(
-            model.gam_,
-            X_train_df,
-            save_path=output_dir / "wind_sector_map.png",
-        )
+        pass
+        # sv.plot_wind_sector_map(
+        #     model.gam_,
+        #     X_train_df,
+        #     save_path=output_dir / "wind_sector_map.png",
+        # )
 
     # GAM map + wind rose inset (requires ERA5 wind data)
     # This map is a bit hacky..Also dont like the position of the
@@ -2635,11 +2636,12 @@ def create_publication_figure_set(
     # results presented this time.
 
     if wind_df is not None and hasattr(model, "gam_") and model.gam_ is not None:
-        lur_vals = model.gam_.predict(model._X_train)
-        sv.plot_gam_with_wind_rose(
-            lur_vals,
-            wind_df,
-            save_path=output_dir / "gam_wind_rose.png",
-        )
+        pass
+        # lur_vals = model.gam_.predict(model._X_train)
+        # sv.plot_gam_with_wind_rose(
+        #     lur_vals,
+        #     wind_df,
+        #     save_path=output_dir / "gam_wind_rose.png",
+        # )
 
     logger.info("Figure set written to %s", output_dir)

@@ -141,23 +141,23 @@ def generate_figures(
         )
 
     # Probabilistic calibration — reliability diagram + sharpness + ISS
-    y_obs = epa_eval["obs_value"].values
-    y_pred = hybrid_pred.total[epa_eval["t_idx"].values, epa_eval["loc_idx"].values]
-    y_std = hybrid_pred.std[epa_eval["t_idx"].values, epa_eval["loc_idx"].values]
-    dv = DiagnosticsVisualizer()
-    dv.plot_reliability_diagram(
-        y_obs,
-        y_pred,
-        y_std,
-        save_path=fig_dir / "reliability_diagram.png",
-    )
+    # y_obs = epa_eval["obs_value"].values
+    # y_pred = hybrid_pred.total[epa_eval["t_idx"].values, epa_eval["loc_idx"].values]
+    # y_std = hybrid_pred.std[epa_eval["t_idx"].values, epa_eval["loc_idx"].values]
+    # dv = DiagnosticsVisualizer()
+    # dv.plot_reliability_diagram(
+    #     y_obs,
+    #     y_pred,
+    #     y_std,
+    #     save_path=fig_dir / "reliability_diagram.png",
+    # )
 
     # EPA observed vs predicted time series (per-station + standalone daily mean)
     tv = TemporalVisualizer()
     tv.plot_epa_vs_predicted_timeseries(
         station_preds,
         save_path=fig_dir / "epa_vs_predicted_timeseries.png",
-        summary_save_path=fig_dir / "epa_daily_mean_timeseries.png",
+        # summary_save_path=fig_dir / "epa_daily_mean_timeseries.png",
     )
 
     # SSM latent factor heatmap (alpha_t per day) — written by pipeline/evaluate.py

@@ -261,12 +261,12 @@ def evaluate_model(
     ).to_csv(output_dir / "calibration_metrics.csv", index=False)
 
     # Hybrid residual diagnostic figure — use calibrated std for the interval plot
-    evaluator.diagnostic_plots(
-        y_true=y_obs,
-        y_pred=y_hyb,
-        y_std=y_std_calibrated,
-        save_path=fig_dir / "hybrid_residual_diagnostics.png",
-    )
+    # evaluator.diagnostic_plots(
+    #     y_true=y_obs,
+    #     y_pred=y_hyb,
+    #     y_std=y_std_calibrated,
+    #     save_path=fig_dir / "hybrid_residual_diagnostics.png",
+    # )
 
     # SSM temporal factors
     smoothed = model.ssm_.smoother_result_.smoothed_means
