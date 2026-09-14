@@ -140,6 +140,7 @@ def run(args) -> None:
     logger.info("=" * 60)
 
     model = HybridGAMSSM(
+        state_dim=args.state_dim,
         n_splines=args.n_splines,
         em_max_iter=args.em_max_iter,
         em_tol=args.em_tol,
@@ -265,6 +266,12 @@ def main() -> None:
     )
     parser.add_argument("--skip-feature-selection", action="store_true")
 
+    parser.add_argument(
+        "--state-dim",
+        type=int,
+        default=3,
+        help="SVD-compressed SSM latent state dimension k (default 3, matching the paper)",
+    )
     parser.add_argument("--n-splines", type=int, default=10)
     parser.add_argument("--em-max-iter", type=int, default=50)
     parser.add_argument("--em-tol", type=float, default=1e-4)
