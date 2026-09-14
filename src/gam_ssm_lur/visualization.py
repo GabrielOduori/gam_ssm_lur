@@ -303,8 +303,12 @@ class SpatialVisualizer:
                 try:
                     import contextily as ctx
 
+                    # CartoDB's free tiles now require an API key (as of their
+                    # 2026 pricing change) and silently return watermarked
+                    # "API KEY REQUIRED" tiles rather than raising an error;
+                    # OpenStreetMap's standard tiles remain free/keyless.
                     provider = (
-                        ctx.providers.CartoDB.Positron
+                        ctx.providers.OpenStreetMap.Mapnik
                         if basemap_source is None
                         else _resolve_provider(basemap_source)
                     )
