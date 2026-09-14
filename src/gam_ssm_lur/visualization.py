@@ -859,6 +859,7 @@ class SpatialVisualizer:
 
         shap_df = pd.DataFrame(shap_values, columns=feat_cols)
         mean_abs = shap_df.abs().mean().sort_values(ascending=False)
+        n_top = min(n_top, len(mean_abs))
         top_feats = mean_abs.head(n_top).index.tolist()
 
         shap_top = shap_df[top_feats].values
