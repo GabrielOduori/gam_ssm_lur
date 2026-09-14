@@ -894,6 +894,7 @@ class SpatialVisualizer:
             ("building_commercial_area_", "Commercial buildings "),
             ("population_density_km2", "Population density"),
             ("elevation_m", "Elevation"),
+            ("avg_wind_speed", "Average wind speed"),
             ("m_s", "m "),
         ]
 
