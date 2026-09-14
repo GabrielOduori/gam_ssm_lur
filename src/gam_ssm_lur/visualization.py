@@ -583,7 +583,7 @@ class SpatialVisualizer:
                 cmap="turbo",
                 vmin=vmin,
                 vmax=vmax,
-                basemap=True,
+                basemap=False,
             )
 
             # Build title
@@ -644,7 +644,7 @@ class SpatialVisualizer:
                 vmin=0,
                 vmax=vmax_pred,
                 legend_label="NO₂ (µg/m³)",
-                basemap=True,
+                basemap=False,
             )
             axes[col].set_title(
                 "(a) GAM Spatial Prediction", fontsize=11, fontweight="bold"
@@ -662,7 +662,7 @@ class SpatialVisualizer:
             vmin=-lim,
             vmax=lim,
             legend_label="Residual (µg/m³)",
-            basemap=True,
+            basemap=False,
         )
         axes[col].set_title(
             f"{label_b} Signed Residuals  (obs − predicted)",
@@ -679,7 +679,7 @@ class SpatialVisualizer:
             vmin=0,
             vmax=lim,
             legend_label="|Residual| (µg/m³)",
-            basemap=True,
+            basemap=False,
         )
         axes[col].set_title(f"{label_c} Absolute Error", fontsize=11, fontweight="bold")
 
@@ -1054,7 +1054,7 @@ class SpatialVisualizer:
                 vmin=vmin,
                 vmax=vmax,
                 legend=(s == n_sectors - 1),  # colorbar on last panel only
-                basemap=True,
+                basemap=False,
             )
             ax.set_title(
                 f"Dominant wind: {sector_names[s]}",
@@ -1128,7 +1128,7 @@ class SpatialVisualizer:
         )
 
         # Draw main map — suppress built-in legend, we place it manually
-        self._map_ax(ax_map, gam_values, cmap="turbo", legend=False, basemap=True)
+        self._map_ax(ax_map, gam_values, cmap="turbo", legend=False, basemap=False)
         ax_map.set_title(title, fontsize=12, fontweight="bold", pad=12)
 
         # Manual NO₂ colourbar in right strip
@@ -2537,7 +2537,7 @@ def create_publication_figure_set(
         sv.plot_surface(
             lur_pred,
             title="GAM LUR — Annual Mean NO₂",
-            basemap=True,
+            basemap=False,
             station_df=station_loc_df,
             save_path=output_dir / "static_lur_prior.png",
         )
