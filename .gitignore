@@ -255,3 +255,6 @@ _deprecated/
 # pre-commit install --hook-type commit-msg will fail until it's recreated
 # manually (see git history for its content if needed).
 .tools/
+
+# staging area for rebuilt data.zip archives pending Zenodo upload
+/zenodo_upload/
