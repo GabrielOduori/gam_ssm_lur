@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,8 @@ def generate_figures(
     imp=None,
     moran_result=None,
     moran_weights=None,
+    basemap: bool = False,
+    basemap_source: Optional[str] = None,
 ):  # noqa: ARG001
     """Save all publication figures to fig_dir."""
     grid_gdf = ds.load_grid_geometry()
@@ -85,6 +88,8 @@ def generate_figures(
         station_preds=station_preds,
         X_train_df=X_train_df,
         wind_df=wind_df,
+        basemap=basemap,
+        basemap_source=basemap_source,
     )
 
     # SVD scree plot — factor selection diagnostic
