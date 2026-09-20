@@ -10,7 +10,7 @@ A Python framework for spatio-temporal air pollution modelling that integrates G
 Traditional Land Use Regression (LUR) models capture spatial heterogeneity in air pollution but treat temporal variation through model structure rather than as an explicit dynamical process. This package implements a hybrid framework that:
 
 1. **GAM Component**: Captures persistent spatial patterns through smooth functions of land use, road network, and traffic covariates
-2. **SSM Component**: Models temporal dynamics via Kalman filtering with Expectation-Maximisation parameter estimation. The GAM-regression coefficient (β) and external forcing coefficients (e.g. traffic anomaly, wind; B̃) are jointly estimated alongside the latent dynamics by an augmented-state EM, rather than pre-estimated by OLS and subtracted , avoiding silently discarding their estimation error into the dynamics (Harvey, 1989, Ch. 3.3).
+2. **SSM Component**: Models temporal dynamics via Kalman filtering with Expectation-Maximisation parameter estimation. The GAM-regression coefficient (β) and external forcing coefficients (e.g. traffic anomaly, wind; B̃) are jointly estimated alongside the latent dynamics by an augmented-state EM, rather than pre-estimated by OLS and subtracted, avoiding silently discarding their estimation error into the dynamics (Harvey, 1989, Ch. 3.3).
 3. **Uncertainty Quantification**: Provides prediction intervals through posterior state distributions
 
 ## Model Architecture
@@ -26,6 +26,8 @@ Traditional Land Use Regression (LUR) models capture spatial heterogeneity in ai
 │  │   • Land use features                                    │   │
 │  │   • Road network density                                 │   │
 │  │   • Traffic proximity                                    │   │
+│  │   • Background covariates (elevation, population,        │   │
+│  │     mean wind speed)                                      │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                           │                                     │
 │                           ▼                                     │
@@ -59,7 +61,7 @@ source .venv/bin/activate
 python3 -m pip install -e ".[dev]"
 ```
 
-Or, using the `Makefile` shortcut (also registers both pre-commit hook stages , see Development below):
+Or, using the `Makefile` shortcut (also registers both pre-commit hook stages, see Development below):
 
 ```bash
 make install-dev
@@ -121,13 +123,14 @@ ruff check src/ tests/        # lint
 ruff format src/ tests/       # format
 ```
 
-Rule selection (`E`, `W`, `F`, `I`, `C`, `B` — pycodestyle, Pyflakes, isort, flake8-comprehensions, flake8-bugbear) and per-file exceptions (e.g. `E402` for the standalone scripts under `experiments/`/`.tools/` that bootstrap `sys.path` before importing the package) live in `pyproject.toml` under `[tool.ruff]`.
+Rule selection (`E`, `W`, `F`, `I`, `C`, `B`; pycodestyle, Pyflakes, isort, flake8-comprehensions, flake8-bugbear) and per-file exceptions (e.g. `E402` for the standalone scripts under `experiments/`/`.tools/` that bootstrap `sys.path` before importing the package) live in `pyproject.toml` under `[tool.ruff]`.
 
 ## Data Directory Structure
 
 ```
 data/
-├── features.csv              # Static spatial features per grid cell
+├── features.csv              # Static spatial features per grid cell (includes avg_wind_speed,
+│                              #   a static background covariate derived from ERA5-Land)
 ├── target.csv                # Static NO₂ target values per grid cell
 ├── grid/
 │   └── grid.geojson          # Grid cell geometries
@@ -140,7 +143,7 @@ data/
 
 ### Data Access
 
-The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI , always resolves to the latest version).
+The datasets above are archived on Zenodo: **[10.5281/zenodo.16534137](https://doi.org/10.5281/zenodo.16534137)** (concept DOI, always resolves to the latest version).
 
 You don't need to download this manually. If `data/` is missing any required file, `experiments/reproduce_paper.py` automatically fetches and extracts the archive on first run via `ensure_data_available()` in `src/gam_ssm_lur/fetch_data.py`. To trigger this fetch standalone:
 
@@ -235,16 +238,16 @@ Run them after `reproduce_paper.py` has completed (results from the main run are
 # Leakage-free nested LOOCV (Table 6 cross-validation column)
 python experiments/nested_loocv.py
 
-# Naive temporal baselines — persistence, station and domain climatology (Table 7)
+# Naive temporal baselines; persistence, station and domain climatology (Table 7)
 python experiments/baselines.py
 
-# Component ablations — GAM-only, TROPOMI-only, SSM forcing knock-outs (Table 8)
+# Component ablations; GAM-only, TROPOMI-only, SSM forcing knock-outs (Table 8)
 python experiments/component_ablations.py
 
 # Filter-only forecast evaluation and k-sensitivity analysis
 python experiments/forecast_and_k.py
 
-# ML and geostatistical benchmarks — RF, GBM, GP kriging (Table 7)
+# ML and geostatistical benchmarks; RF, GBM, GP kriging (Table 7)
 python experiments/ml_geo_benchmarks.py
 
 # Wind-sector vs circular-buffer spatial feature ablation (Table 5)
@@ -264,13 +267,13 @@ All scripts accept `--help` for available options.
 ## Citation
 
 ```bibtex
-@article{oduori2025hybrid,
-  title={Hybrid Generalized Additive-State Space Modelling for Urban {NO}$_2$ 
-         Prediction: Integrating Spatial and Temporal Dynamics},
+@article{oduori2026hybrid,
+  title={Hybrid Generalised Additive-State Space Modelling for Urban {NO}$_2$
+         Mapping: An Open-Source Spatio-Temporal Workflow},
   author={Oduori, Gabriel and Cocco, Chiara and Sajadi, Payam and Pilla, Francesco},
   journal={Environmental Modelling \& Software},
-  year={2025},
-  note={Submitted}
+  year={2026},
+  note={Under review}
 }
 ```
 

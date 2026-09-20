@@ -34,6 +34,7 @@ References
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -108,6 +109,29 @@ def _resolve_provider(source: str):
     return obj
 
 
+def _resolve_basemap_provider(source: Optional[str]):
+    """Return a contextily tile provider, avoiding keyless CartoDB requests."""
+    import contextily as ctx
+
+    if source is None:
+        return ctx.providers.OpenStreetMap.Mapnik
+
+    provider = _resolve_provider(source)
+    if source.startswith("CartoDB."):
+        api_key = os.getenv("CARTO_API_KEY") or os.getenv("CARTODB_API_KEY")
+        if api_key:
+            provider = provider.copy()
+            provider["apikey"] = api_key
+        else:
+            logger.warning(
+                "%s now requires a CARTO_API_KEY/CARTODB_API_KEY; "
+                "falling back to OpenStreetMap.Mapnik",
+                source,
+            )
+            provider = ctx.providers.OpenStreetMap.Mapnik
+    return provider
+
+
 def _no2_cmap_norm():
     """Return (ListedColormap, BoundaryNorm) for the fixed NO2 colour scheme."""
     from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -124,6 +148,9 @@ COL_OBS = "black"  # observed station measurements
 ALPHA_MAP = 0.5
 ALPHA_SHADE = 0.2
 MISSING_KWD = {"color": "lightgrey", "alpha": ALPHA_MAP}
+BASEMAP_HEADERS = {
+    "User-Agent": "gam-ssm-lur/0.1 (https://github.com/GabrielOduori/lur_space_state_model)",
+}
 
 # Per-station colours for LOOCV scatter
 _STATION_PALETTE = [
@@ -303,15 +330,23 @@ class SpatialVisualizer:
                 try:
                     import contextily as ctx
 
-                    provider = (
-                        ctx.providers.CartoDB.Positron
-                        if basemap_source is None
-                        else _resolve_provider(basemap_source)
-                    )
+                    provider = _resolve_basemap_provider(basemap_source)
                     crs = merged.crs or "EPSG:4326"
-                    ctx.add_basemap(ax, source=provider, crs=crs, zoom="auto", zorder=0)
+                    ctx.add_basemap(
+                        ax,
+                        source=provider,
+                        crs=crs,
+                        headers=BASEMAP_HEADERS,
+                        zoom="auto",
+                        zorder=0,
+                    )
                 except ImportError:
                     logger.warning("contextily not installed — basemap skipped")
+                except Exception as exc:
+                    provider_name = basemap_source or "OpenStreetMap.Mapnik"
+                    logger.warning(
+                        "Basemap %s could not be added: %s", provider_name, exc
+                    )
 
         else:
             # Scatter fallback
@@ -383,10 +418,9 @@ class SpatialVisualizer:
         ax : Axes, optional
             Existing axes to plot on.
         basemap : bool
-            Overlay a CartoDB tile basemap (requires contextily).
+            Add an OpenStreetMap tile basemap (requires contextily and internet).
         basemap_source : str, optional
-            Tile provider, e.g. ``"CartoDB.Positron"`` (default) or
-            ``"OpenStreetMap.Mapnik"``.
+            Tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
         station_df : pd.DataFrame, optional
             DataFrame with station locations to overlay as labelled markers.
             Must contain columns named by ``station_lat_col``,
@@ -464,6 +498,8 @@ class SpatialVisualizer:
         self,
         panels: List[Tuple[NDArray, str]],
         suptitle: str = "",
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """Side-by-side comparison of up to 4 spatial fields.
@@ -477,6 +513,10 @@ class SpatialVisualizer:
             Each tuple is an array of shape (n_cells,) and a panel title.
         suptitle : str
             Figure super-title.
+        basemap : bool
+            Add an OpenStreetMap tile basemap behind each panel.
+        basemap_source : str, optional
+            Contextily tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
         save_path : str or Path, optional
             Path to save figure.
 
@@ -503,6 +543,8 @@ class SpatialVisualizer:
                 vmax=vmax,
                 legend=True,
                 legend_label="NO₂ (µg/m³)",
+                basemap=basemap,
+                basemap_source=basemap_source,
             )
             ax.set_title(label, fontsize=11, fontweight="bold")
 
@@ -527,6 +569,8 @@ class SpatialVisualizer:
         forcing_col: Optional[str] = "delta_traffic",
         satellite_col: Optional[str] = "has_satellite",
         suptitle: str = "",
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """2×N grid of daily SSM maps for selected dates.
@@ -548,6 +592,10 @@ class SpatialVisualizer:
             Boolean column indicating satellite update days.  Set to None to omit.
         save_path : str or Path, optional
             Path to save figure.
+        basemap : bool
+            Add an OpenStreetMap tile basemap behind each snapshot.
+        basemap_source : str, optional
+            Contextily tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
 
         Returns
         -------
@@ -579,7 +627,8 @@ class SpatialVisualizer:
                 cmap="turbo",
                 vmin=vmin,
                 vmax=vmax,
-                basemap=True,
+                basemap=basemap,
+                basemap_source=basemap_source,
             )
 
             # Build title
@@ -614,6 +663,8 @@ class SpatialVisualizer:
         predictions: Optional[NDArray] = None,
         grid_ids: Optional[List[str]] = None,
         title: str = "Spatial Residuals",
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """GAM prediction map + signed residual map + absolute error map.
@@ -640,7 +691,8 @@ class SpatialVisualizer:
                 vmin=0,
                 vmax=vmax_pred,
                 legend_label="NO₂ (µg/m³)",
-                basemap=True,
+                basemap=basemap,
+                basemap_source=basemap_source,
             )
             axes[col].set_title(
                 "(a) GAM Spatial Prediction", fontsize=11, fontweight="bold"
@@ -658,7 +710,8 @@ class SpatialVisualizer:
             vmin=-lim,
             vmax=lim,
             legend_label="Residual (µg/m³)",
-            basemap=True,
+            basemap=basemap,
+            basemap_source=basemap_source,
         )
         axes[col].set_title(
             f"{label_b} Signed Residuals  (obs − predicted)",
@@ -675,7 +728,8 @@ class SpatialVisualizer:
             vmin=0,
             vmax=lim,
             legend_label="|Residual| (µg/m³)",
-            basemap=True,
+            basemap=basemap,
+            basemap_source=basemap_source,
         )
         axes[col].set_title(f"{label_c} Absolute Error", fontsize=11, fontweight="bold")
 
@@ -859,6 +913,7 @@ class SpatialVisualizer:
 
         shap_df = pd.DataFrame(shap_values, columns=feat_cols)
         mean_abs = shap_df.abs().mean().sort_values(ascending=False)
+        n_top = min(n_top, len(mean_abs))
         top_feats = mean_abs.head(n_top).index.tolist()
 
         shap_top = shap_df[top_feats].values
@@ -893,6 +948,7 @@ class SpatialVisualizer:
             ("building_commercial_area_", "Commercial buildings "),
             ("population_density_km2", "Population density"),
             ("elevation_m", "Elevation"),
+            ("avg_wind_speed", "Average wind speed"),
             ("m_s", "m "),
         ]
 
@@ -950,6 +1006,8 @@ class SpatialVisualizer:
         n_sectors: int = 8,
         ncols: int = 4,
         shared_scale: bool = True,
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """Panel of GAM spatial NO₂ maps — one per dominant wind sector.
@@ -984,6 +1042,10 @@ class SpatialVisualizer:
             Columns in the figure panel.
         shared_scale : bool
             If True all panels share the same colour axis (easier comparison).
+        basemap : bool
+            Add an OpenStreetMap tile basemap behind each panel.
+        basemap_source : str, optional
+            Contextily tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
         save_path : str or Path, optional
             Path to save figure.
 
@@ -1048,7 +1110,8 @@ class SpatialVisualizer:
                 vmin=vmin,
                 vmax=vmax,
                 legend=(s == n_sectors - 1),  # colorbar on last panel only
-                basemap=True,
+                basemap=basemap,
+                basemap_source=basemap_source,
             )
             ax.set_title(
                 f"Dominant wind: {sector_names[s]}",
@@ -1073,6 +1136,8 @@ class SpatialVisualizer:
         wind_df: pd.DataFrame,
         n_sectors: int = 8,
         title: str = "GAM-LUR Annual Mean NO₂ with ERA5 Wind Rose",
+        basemap: bool = False,
+        basemap_source: Optional[str] = None,
         save_path: Optional[Union[str, Path]] = None,
     ) -> plt.Figure:
         """GAM spatial NO₂ map with an ERA5 wind rose inset.
@@ -1097,6 +1162,10 @@ class SpatialVisualizer:
             Number of wind sectors (default 8).
         title : str
             Figure title.
+        basemap : bool
+            Add an OpenStreetMap tile basemap behind the main map.
+        basemap_source : str, optional
+            Contextily tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
         save_path : str or Path, optional
             Path to save figure.
 
@@ -1122,7 +1191,14 @@ class SpatialVisualizer:
         )
 
         # Draw main map — suppress built-in legend, we place it manually
-        self._map_ax(ax_map, gam_values, cmap="turbo", legend=False, basemap=True)
+        self._map_ax(
+            ax_map,
+            gam_values,
+            cmap="turbo",
+            legend=False,
+            basemap=basemap,
+            basemap_source=basemap_source,
+        )
         ax_map.set_title(title, fontsize=12, fontweight="bold", pad=12)
 
         # Manual NO₂ colourbar in right strip
@@ -2460,6 +2536,8 @@ def create_publication_figure_set(
     selected_dates: Optional[List] = None,
     X_train_df: Optional[pd.DataFrame] = None,
     wind_df: Optional[pd.DataFrame] = None,
+    basemap: bool = False,
+    basemap_source: Optional[str] = None,
 ) -> None:
     """Generate the full set of publication figures.
 
@@ -2498,6 +2576,10 @@ def create_publication_figure_set(
     wind_df : pd.DataFrame, optional
         ERA5 wind sector daily data with columns ``wind_sector_N_freq`` and
         ``wind_sector_N_mean_speed``.  Used for the GAM + wind rose map.
+    basemap : bool
+        Add an OpenStreetMap tile basemap behind spatial maps.
+    basemap_source : str, optional
+        Contextily tile provider, e.g. ``"OpenStreetMap.Mapnik"``.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2531,7 +2613,8 @@ def create_publication_figure_set(
         sv.plot_surface(
             lur_pred,
             title="GAM LUR — Annual Mean NO₂",
-            basemap=True,
+            basemap=basemap,
+            basemap_source=basemap_source,
             station_df=station_loc_df,
             save_path=output_dir / "static_lur_prior.png",
         )
@@ -2542,6 +2625,8 @@ def create_publication_figure_set(
             res,
             predictions=lur_pred,
             title="GAM LUR — Spatial Prediction and Residuals",
+            basemap=basemap,
+            basemap_source=basemap_source,
             save_path=output_dir / "spatial_residuals.png",
         )
         # dv.plot_residual_panel(
@@ -2593,6 +2678,8 @@ def create_publication_figure_set(
             ssm_df,
             dates=dates,
             suptitle="GAM-SSM Daily NO₂ — low → high pollution days",
+            basemap=basemap,
+            basemap_source=basemap_source,
             save_path=output_dir / "ssm_selected_days.png",
         )
         tv.plot_daily_mean_barchart(

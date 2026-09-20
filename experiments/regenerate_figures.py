@@ -85,6 +85,16 @@ def main() -> None:
         default=None,
         help="Output figures directory (default: <run-dir>/figures)",
     )
+    parser.add_argument(
+        "--no-basemap",
+        action="store_true",
+        help="Disable OpenStreetMap backgrounds on spatial figures",
+    )
+    parser.add_argument(
+        "--basemap-source",
+        default=None,
+        help='Contextily tile provider (default: "OpenStreetMap.Mapnik")',
+    )
 
     # Data column names — must match the original run
     parser.add_argument("--target-col", default="atmos_no2")
@@ -107,6 +117,12 @@ def main() -> None:
 
     logger.info("Run directory : %s", run_dir)
     logger.info("Figures → %s", fig_dir)
+    logger.info(
+        "Basemap     : %s",
+        "disabled"
+        if args.no_basemap
+        else args.basemap_source or "OpenStreetMap.Mapnik",
+    )
 
     # ── 1. Load model ─────────────────────────────────────────────────────────
     logger.info("Loading model...")
@@ -208,6 +224,8 @@ def main() -> None:
         imp=imp,
         moran_result=moran_result,
         moran_weights=moran_weights,
+        basemap=not args.no_basemap,
+        basemap_source=args.basemap_source,
     )
 
     logger.info("Done. Figures saved to %s", fig_dir)
